@@ -1,0 +1,60 @@
+{% if doc %}
+<article>
+    <header id="data-header">
+        <hgroup>
+            <h3>{{ doc.title }}</h3>
+            <p>
+                <mark>{{ doc.sender }}</mark>
+                <span class="detail-separator">|</span>
+                <small>{{ doc.timestamp }}</small>
+            </p>
+        </hgroup>
+
+        {% if doc.notice %}
+        <p class="success-message">{{ doc.notice }}</p>
+        {% endif %}
+
+        <div class="metadata-tags">
+            {% if doc.metadata %}
+                {% if doc.metadata.source %}
+                <span class="badge">来源: {{ doc.metadata.source }}</span>
+                {% endif %}
+                {% if doc.metadata.model %}
+                <span class="badge">模型: {{ doc.metadata.model }}</span>
+                {% endif %}
+                {% if doc.metadata.tags %}
+                    {% for tag in doc.metadata.tags %}
+                    <span class="tag">#{{ tag }}</span>
+                    {% endfor %}
+                {% endif %}
+            {% endif %}
+        </div>
+    </header>
+
+    <hr>
+
+    <div class="content-body markdown-body">
+        {{ doc.content_html | safe }}
+    </div>
+
+    <footer>
+        <div class="grid">
+            <button
+                hx-get="/api/edit/{{ doc.doc_id }}"
+                hx-target="#content-display"
+                hx-swap="innerHTML"
+                class="secondary outline"
+            >
+                编辑全文
+            </button>
+            <button class="contrast outline" disabled>
+                上下文查看待实现
+            </button>
+        </div>
+    </footer>
+</article>
+{% else %}
+<article>
+    <p class="error-message">文档内容加载失败，请重试。</p>
+</article>
+{% endif %}

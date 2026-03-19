@@ -1,0 +1,47 @@
+<article>
+    <header>
+        <button aria-label="Close" rel="prev" hx-post="/api/close_modal" hx-target="#data-form-modal" hx-swap="none"></button>
+        <h3>📝 添加新数据</h3>
+    </header>
+    <form hx-post="/api/save_document" hx-target="#data-form-modal" hx-swap="none">
+        <!-- 基本信息 -->
+        <fieldset>
+            <legend>📋 基本信息</legend>
+            <label for="add-title-input">标题
+                <input type="text" id="add-title-input" name="title" value="无标题">
+            </label>
+            <label for="add-sender-input">发送者/来源
+                <input type="text" id="add-sender-input" name="sender" value="未知">
+            </label>
+        </fieldset>
+
+        <!-- 标签管理 -->
+        <fieldset>
+            <legend>🏷️ 标签管理</legend>
+            <label for="add-tags">选择已有标签
+                <select id="add-tags" name="tags" multiple>
+                    {% for tag in all_tags %}
+                        <option value="{{ tag }}">{{ tag }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label for="add-new-tags">新增标签（用逗号分隔）
+                <input type="text" id="add-new-tags" name="new_tags" placeholder="例如：重要, 待办, 工作">
+            </label>
+        </fieldset>
+
+        <!-- 内容 -->
+        <fieldset>
+            <legend>📝 内容</legend>
+            <label for="add-content">内容
+                <textarea id="add-content" name="content" rows="10" required></textarea>
+            </label>
+        </fieldset>
+
+        <!-- 按钮 -->
+        <div class="grid">
+            <button type="submit" class="primary">💾 保存</button>
+            <button type="button" hx-post="/api/close_modal" hx-target="#data-form-modal" hx-swap="none" class="secondary">❌ 取消</button>
+        </div>
+    </form>
+</article>

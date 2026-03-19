@@ -1,0 +1,25 @@
+# 排除所有虚拟环境
+.venv/
+venv/
+__pycache__/
+
+# 排除数据库和敏感数据（最重要！）
+data/
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.log
+
+# 排除敏感配置文件
+.env
+
+# 排除 PyCharm 和 VS Code 的配置
+.idea/
+.vscode/
+
+*.pyc
+legacy/
+legacy/*
+
+

@@ -1,0 +1,596 @@
+/**
+ * ============================================
+ * custom.css - RAG 故事库自定义样式表
+ * ============================================
+ * 
+ * 文件说明：
+ * - 定义项目全局 CSS 变量、布局结构、搜索面板、结果卡片等样式
+ * - 适配 Flask 模板的 HTML 结构
+ * 
+ * 颜色主题：
+ * - 主色调：#0066cc (蓝色)
+ * - 背景色：白色 (#ffffff)
+ * - 文字色：#555 (灰色)
+ * - 边框色：#e0e0e0 (浅灰)
+ * 
+ * 布局说明：
+ * - 双栏布局：左侧 360px 固定宽度搜索面板 + 右侧自适应内容区
+ * - 搜索面板采用 sticky 定位，始终可见
+ */
+
+/* ============================================
+   第一部分：CSS 变量定义 (CSS Custom Properties)
+   ============================================
+   使用 :root 选择器定义全局 CSS 变量，便于统一管理和修改
+*/
+
+:root {
+  /* -------- 颜色变量 -------- */
+  --primary: #0066cc;           /* 主色调 - 蓝色，用于按钮、链接、强调元素 */
+  --muted-color: #e0e0e0;       /* 暗淡色调 - 浅灰色，用于徽章、禁用状态 */
+
+  /* -------- 间距变量 -------- */
+  /* 使用 rem 单位，便于根据根元素字体大小进行缩放 */
+  --spacing-small: 0.5rem;      /* 小间距 - 用于紧凑元素间的间距 */
+  --spacing-medium: 1rem;       /* 中等间距 - 用于常规元素间距 */
+  --spacing-large: 1.5rem;      /* 大间距 - 用于区块之间的间距 */
+
+  /* -------- 圆角变量 -------- */
+  --border-radius: 4px;         /* 统一圆角半径，适用于卡片、按钮、输入框等 */
+
+  /* -------- 阴影变量 -------- */
+  /* 卡片阴影：柔和的投影效果，增加层次感 */
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+
+/* ============================================
+   第二部分：基础重置样式 (CSS Reset / Base Styles)
+   ============================================
+   统一浏览器默认样式，确保跨浏览器一致性
+*/
+
+html,
+body {
+  /* 清除浏览器默认的外边距和内边距 */
+  margin: 0;
+  padding: 0;
+  
+  /* 确保页面至少占满视口高度，防止页面过短时出现布局问题 */
+  height: 100%;
+  
+  /* 使用系统字体栈，提供最佳的可读性和性能 */
+  /* system-ui: 现代操作系统默认 UI 字体 */
+  font-family: system-ui, sans-serif;
+  
+  /* 使用 inherit 确保 box-sizing 继承自父元素 */
+  box-sizing: border-box;
+}
+
+/* container 和 main 是 Flask 模板中的主要布局容器 */
+.container,
+main {
+  padding: 0;  /* 移除默认内边距，由子元素控制间距 */
+}
+
+/* 通配符选择器选中所有元素及其伪元素 */
+*,
+*::before,
+*::after {
+  /* 继承 box-sizing，确保所有元素采用统一的盒模型计算方式 */
+  box-sizing: inherit;
+}
+
+
+/* ============================================
+   第三部分：双栏网格布局 (Grid Layout)
+   ============================================
+   实现左侧搜索面板 + 右侧内容区域的经典 RAG 应用布局
+*/
+
+.grid {
+  /* 启用 CSS Grid 布局 */
+  display: grid;
+  
+  /* 
+   * 定义两列布局：
+   * - 第一列：360px 固定宽度（搜索面板）
+   * - 第二列：1fr 自适应宽度（内容区域）
+   */
+  grid-template-columns: 360px 1fr;
+  
+  /* 栏与栏之间的间距 */
+  gap: var(--spacing-medium);
+  
+  /* 高度根据内容自动调整 */
+  height: auto;
+  
+  /* 移除内边距，由子元素自行控制 */
+  padding: 0;
+}
+
+
+/* ============================================
+   第四部分：搜索面板样式 (Search Panel)
+   ============================================
+   左侧搜索面板采用 sticky 定位，确保在滚动时始终可见
+*/
+
+.search-panel {
+  /* 
+   * sticky 定位：
+   * - 相对于最近的可滚动祖先元素定位
+   * - 当面板顶部到达 viewport 的 0 位置时固定
+   */
+  position: sticky;
+  top: 0;
+  
+  /* 占满整个视口高度，使面板从顶部延伸到底部 */
+  height: 100vh;
+  
+  /* 使用弹性盒模型，方便内部元素垂直排列 */
+  display: flex;
+  flex-direction: column;
+  
+  /* 白色背景，与页面背景形成对比 */
+  background: white;
+  
+  /* overflow: visible 允许内容溢出面板边界 */
+  overflow: visible;
+  
+  /* 移除顶部内边距（顶部已有 sticky 定位的元素） */
+  padding-top: 0;
+}
+
+
+/* ============================================
+   第五部分：Sticky 定位的内部元素
+   ============================================
+   搜索面板内部的多个 sticky 元素，确保搜索控件始终可见
+*/
+
+.menu-bar,
+.search-input,
+.filters,
+.search-header {
+  /* 
+   * flex: 0 0 auto
+   * - flex-grow: 0 不参与剩余空间分配
+   * - flex-shrink: 0 不会被压缩
+   * - flex-basis: auto 根据内容尺寸自动调整
+   */
+  flex: 0 0 auto;
+  
+  /* 同样的 sticky 定位，确保这些元素在滚动时固定在顶部 */
+  position: sticky;
+  top: 0;
+  
+  /* 白色背景，覆盖下面的内容 */
+  background: white;
+  
+  /* 设置较高的 z-index，确保在内容之上 */
+  z-index: 5;
+  
+  /* 内边距：上下 0.5rem，左右 0 */
+  padding: 0.5rem 0;
+}
+
+
+/* ============================================
+   第六部分：菜单栏样式 (Menu Bar)
+   ============================================
+   顶部导航菜单，采用均匀分布的布局
+*/
+
+.menu-bar {
+  /* 弹性盒布局 */
+  display: flex;
+  
+  /* 
+   * justify-content: space-evenly
+   * - 所有子元素均匀分布，首尾元素距边缘距离等于元素间距的一半
+   */
+  justify-content: space-evenly;
+  
+  /* 外边距：上下 0.2rem，左右 0 */
+  margin: 0.2rem;
+}
+
+
+/* ============================================
+   第七部分：搜索输入框样式 (Search Input)
+   ============================================
+*/
+
+#search-input {
+  margin: 0.3rem;               /* 外边距 */
+  width: 97%;                   /* 宽度占满父元素，保留 3% 边距 */
+}
+
+
+/* ============================================
+   第八部分：折叠细节元素样式 (Details Element)
+   ============================================
+   HTML <details> 元素用于创建可折叠的过滤区域
+*/
+
+details {
+  margin: 0.3rem;               /* 外边距 */
+  padding: 3px;                 /* 内边距 */
+  border-bottom: 0;             /* 移除底部边框 */
+}
+
+
+/* ============================================
+   第九部分：过滤器按钮和选择框样式 (Filter Controls)
+   ============================================
+*/
+
+.filter-button,
+.filter-select {
+  margin: 0;                    /* 移除默认外边距 */
+  padding: 0.3rem;              /* 内边距 */
+}
+
+.filter-select {
+  width: 100%;                  /* 宽度占满父元素 */
+  height: 100%;                 /* 高度占满父元素 */
+  padding: 0.3rem;              /* 内边距 */
+}
+
+/* 日期选择器输入框 */
+#start-date,
+#end-date {
+  margin: 0;                    /* 移除默认外边距 */
+  width: 100%;                  /* 宽度占满 */
+  height: 80%;                  /* 高度为父元素的 80% */
+}
+
+
+/* ============================================
+   第十部分：过滤行布局样式 (Filter Row)
+   ============================================
+   包含筛选按钮和日期选择器的行容器
+*/
+
+.filter-row {
+  /* 弹性盒布局，子元素水平排列 */
+  display: flex;
+  
+  /* 垂直居中对齐 */
+  align-items: center;
+  
+  /* 子元素之间的间距 */
+  gap: 0.5rem;
+  
+  margin: 0.3rem;               /* 外边距 */
+}
+
+/* 过滤行中的图标按钮 */
+.filter-row-icons button {
+  /* 边框样式：1px 实线，灰色 */
+  border: 1px solid var(--muted-border-color);
+  
+  /* 圆角，与主题一致 */
+  border-radius: var(--border-radius);
+  
+  /* 白色背景 */
+  background: white;
+  
+  /* 鼠标指针变为手型，表明可点击 */
+  cursor: pointer;
+}
+
+/* 过滤行图标按钮的悬停状态 */
+.filter-row-icons button:hover {
+  /* 悬停时背景变为浅灰色 */
+  background: #f0f0f0;
+}
+
+/* 日期过滤区域容器 */
+.filter-row-dates {
+  /* 弹性盒布局 */
+  display: flex;
+  
+  /* 垂直居中对齐 */
+  align-items: center;
+  
+  /* 子元素间距 */
+  gap: 0.5rem;
+  
+  /* 宽度占满父元素 */
+  width: 100%;
+  
+  /* 最大宽度限制，防止在小屏幕上过度拉伸 */
+  max-width: 350px;
+  
+  /* 子元素在主轴上两端对齐，中间均匀分布 */
+  justify-content: space-between;
+  
+  margin: 0.3rem;               /* 外边距 */
+}
+
+/* 日期输入框样式 */
+.filter-row-dates input[type="date"] {
+  /* 
+   * flex: 1
+   * - flex-grow: 1 参与剩余空间分配
+   * - flex-shrink: 1 可被压缩
+   * - flex-basis: 0 初始尺寸为 0
+   */
+  flex: 1;
+  
+  /* 最大宽度 160px */
+  max-width: 160px;
+  
+  /* 最小宽度 150px，防止过窄 */
+  min-width: 150px;
+  
+  /* 边框样式 */
+  border: 1px solid var(--muted-border-color);
+  border-radius: var(--border-radius);
+}
+
+
+/* ============================================
+   第十一部分：筛选区域底部边距
+   ============================================
+*/
+
+#shaixuan {
+  margin-bottom: 0.3rem;         /* 底部外边距 */
+}
+
+
+/* ============================================
+   第十二部分：搜索结果列表样式 (Search Results)
+   ============================================
+   搜索结果采用垂直滚动的容器
+*/
+
+#search-results {
+  margin: 0.3rem;                /* 外边距 */
+  
+  /* 
+   * flex: 1 1 auto
+   * - flex-grow: 1 占据剩余空间
+   * - flex-shrink: 1 可被压缩
+   * - flex-basis: auto 自动计算高度
+   */
+  flex: 1 1 auto;
+  
+  /* 
+   * overflow-y: auto
+   * 当内容超出容器高度时显示垂直滚动条
+   */
+  overflow-y: auto;
+  
+  /* min-height: 0 是 flex 子元素的必要设置，防止溢出 */
+  min-height: 0;
+  
+  padding: 0;                    /* 移除内边距 */
+}
+
+
+/* ============================================
+   第十三部分：结果卡片样式 (Result Card)
+   ============================================
+   单个搜索结果的展示卡片
+*/
+
+.result-card {
+  margin-bottom: 0.2rem;         /* 卡片底部间距 */
+  padding: 0.5rem;                /* 内边距 */
+  border-radius: var(--border-radius);  /* 圆角 */
+  box-shadow: var(--card-shadow);       /* 卡片阴影 */
+}
+
+
+/* ============================================
+   第十四部分：搜索结果标题样式
+   ============================================
+*/
+
+#search-results-title {
+  font-size: 15px;               /* 字体大小 */
+}
+
+h2.secondary {
+  margin-bottom: 0;              /* 移除标题默认底部边距 */
+}
+
+
+/* ============================================
+   第十五部分：元数据样式 (Metadata)
+   ============================================
+   显示文档来源、时间等辅助信息
+*/
+
+.meta {
+  font-size: 10px;               /* 小字号，用于次要信息 */
+}
+
+/* 预览文本样式 */
+.preview {
+  font-size: 13px;               /* 字体大小 */
+  line-height: 1.45;             /* 行高，确保多行时舒适阅读 */
+  color: #555;                   /* 灰色文字色 */
+  
+  /* 
+   * WebKit 专有属性，实现多行截断效果
+   * - -webkit-line-clamp: 3 最多显示 3 行
+   * - -webkit-box-orient: vertical 垂直排列
+   * - overflow: hidden 隐藏超出内容
+   */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  
+  margin-top: 0.35rem;           /* 顶部外边距 */
+}
+
+
+/* ============================================
+   第十六部分：详情页面文章样式 (Article Detail)
+   ============================================
+*/
+
+article {
+  margin: 0;                    /* 移除默认外边距 */
+  padding-top: 2.2rem;          /* 顶部内边距，避免被 sticky 元素遮挡 */
+}
+
+h3,
+h4 {
+  margin: 0.1rem;               /* 小间距标题 */
+}
+
+#data-header {
+  margin-bottom: 0.5rem;        /* 底部外边距 */
+  padding-bottom: 0.2rem;       /* 底部内边距 */
+}
+
+/* 元数据信息区域 */
+#metadata-info {
+  font-size: 12px;              /* 字体大小 */
+  line-height: 1.4;             /* 行高 */
+}
+
+
+/* ============================================
+   第十七部分：返回顶部按钮样式 (Back to Top Button)
+   ============================================
+   固定在页面右下角，方便用户快速回到顶部
+*/
+
+#back-to-top {
+  /* 
+   * position: fixed
+   * - 相对于 viewport（视口）定位
+   * - 不随页面滚动移动
+   */
+  position: fixed;
+  
+  /* 距底部 2rem */
+  bottom: 2rem;
+  
+  /* 距右侧 2rem */
+  right: 2rem;
+  
+  /* 按钮尺寸：50x50 像素 */
+  width: 50px;
+  height: 50px;
+  
+  /* 主色调背景，白色文字 */
+  background: var(--primary);
+  color: white;
+  
+  /* 移除默认边框 */
+  border: none;
+  
+  /* 圆形按钮 */
+  border-radius: 50%;
+  
+  /* 字体大小 */
+  font-size: 1.5rem;
+  
+  /* 鼠标指针 */
+  cursor: pointer;
+  
+  /* 
+   * opacity: 0.7
+   * 初始半透明，用户容易注意到但不会太突兀
+   */
+  opacity: 0.7;
+  
+  /* 过渡效果：所有属性变化时平滑动画 */
+  transition: all 0.3s;
+  
+  /* 
+   * z-index: 999
+   * 确保按钮位于所有内容之上
+   */
+  z-index: 999;
+}
+
+/* 返回顶部按钮悬停状态 */
+#back-to-top:hover {
+  opacity: 1;                   /* 完全不透明 */
+  transform: scale(1.1);        /* 放大 1.1 倍 */
+}
+
+
+/* ============================================
+   第十八部分：分隔符和标签样式
+   ============================================
+*/
+
+.detail-separator {
+  margin: 0 10px;               /* 左右外边距 */
+}
+
+/* 元数据标签容器 */
+.metadata-tags {
+  margin-top: 10px;             /* 顶部外边距 */
+  display: flex;                /* 弹性盒布局 */
+  gap: 8px;                     /* 标签间距 */
+  flex-wrap: wrap;              /* 允许标签换行 */
+}
+
+/* 
+ * 徽章样式 (Badge)
+ * 用于显示状态、计数等
+ */
+.badge {
+  background: #e0e0e0;         /* 灰色背景 */
+  color: #666;                 /* 深灰色文字 */
+  padding: 2px 8px;              /* 内边距：上下 2px，左右 8px */
+  border-radius: 4px;            /* 圆角 */
+  font-size: 0.8rem;             /* 字体大小 */
+}
+
+/* 
+ * 标签样式 (Tag)
+ * 用于显示关键词、类别等
+ */
+.tag {
+  color: var(--primary);        /* 主色调文字 */
+  font-size: 0.85rem;           /* 字体大小 */
+  font-weight: bold;            /* 加粗字体 */
+}
+
+
+/* ============================================
+   第十九部分：Markdown 内容样式
+   ============================================
+   用于渲染富文本内容（故事描述、文档正文等）
+*/
+
+.markdown-body {
+  line-height: 1.6;             /* 行高，便于阅读 */
+  font-size: 1.05rem;           /* 稍大的字体，提升可读性 */
+}
+
+
+/* ============================================
+   第二十部分：消息提示样式 (Toast Messages)
+   ============================================
+   用于显示操作成功或错误的反馈信息
+*/
+
+/* 成功消息样式 */
+.success-message {
+  padding: 0.6rem 0.8rem;       /* 内边距 */
+  background: #e8f7e8;        /* 浅绿色背景 */
+  color: #1d5f2b;             /* 深绿色文字 */
+  border-radius: 6px;           /* 圆角 */
+}
+
+/* 错误消息样式 */
+.error-message {
+  padding: 0.6rem 0.8rem;        /* 内边距 */
+  background: #fdecec;         /* 浅红色背景 */
+  color: #8a1f1f;              /* 深红色文字 */
+  border-radius: 6px;            /* 圆角 */
+}
