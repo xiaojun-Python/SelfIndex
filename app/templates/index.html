@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid">
+    <div class="search-panel">
+        <div class="menu-bar">
+            <h2 class="secondary">搜索</h2>
+            <h2 class="secondary" hx-get="/api/add_form" hx-target="#data-form-modal" hx-swap="innerHTML">添加</h2>
+        </div>
+
+        <form id="search-form">
+            <input type="hidden" id="sort-input" name="sort" value="default">
+
+            <input
+                type="search"
+                id="search-input"
+                name="query"
+                placeholder="输入关键词或句子，搜索本地知识库..."
+                hx-get="/api/search"
+                hx-trigger="keyup changed delay:300ms, search"
+                hx-target="#search-results"
+                hx-include="#search-form"
+            >
+
+            <div class="filter-row filter-row-icons">
+                <button
+                    type="button"
+                    class="filter-button"
+                    onclick="document.getElementById('sort-input').value='default'"
+                    hx-get="/api/update_filters"
+                    hx-target="#search-results"
+                    hx-swap="innerHTML"
+                    hx-include="#search-form"
+                    title="按相关度排序"
+                >
+                    相关
+                </button>
+                <button
+                    type="button"
+                    class="filter-button"
+                    onclick="document.getElementById('sort-input').value='time_asc'"
+                    hx-get="/api/update_filters"
+                    hx-target="#search-results"
+                    hx-swap="innerHTML"
+                    hx-include="#search-form"
+                    title="按时间正序"
+                >
+                    最早
+                </button>
+                <button
+                    type="button"
+                    class="filter-button"
+                    onclick="document.getElementById('sort-input').value='time_desc'"
+                    hx-get="/api/update_filters"
+                    hx-target="#search-results"
+                    hx-swap="innerHTML"
+                    hx-include="#search-form"
+                    title="按时间倒序"
+                >
+                    最新
+                </button>
+
+                <select
+                    class="filter-select"
+                    name="min_length"
+                    hx-get="/api/update_filters"
+                    hx-trigger="change"
+                    hx-target="#search-results"
+                    hx-swap="innerHTML"
+                    hx-include="#search-form"
+                >
+                    <option value="0">不限长度</option>
+                    <option value="50">50 字以上</option>
+                    <option value="100">100 字以上</option>
+                    <option value="200">200 字以上</option>
+                </select>
+            </div>
+
+            <div class="filter-row filter-row-dates">
+                <input
+                    id="start-date"
+                    type="date"
+                    name="start_date"
+                    hx-get="/api/update_filters"
+                    hx-trigger="change"
+                    hx-target="#search-results"
+                    hx-swap="innerHTML"
+                    hx-include="#search-form"
+                >
+                <span>-</span>
+                <input
+                    id="end-date"
+                    type="date"
+                    name="end_date"
+                    hx-get="/api/update_filters"
+                    hx-trigger="change"
+                    hx-target="#search-results"
+                    hx-swap="innerHTML"
+                    hx-include="#search-form"
+                >
+            </div>
+        </form>
+
+        <div id="search-results" class="results-container"></div>
+    </div>
+
+    <div class="content-panel">
+        <div id="content-display">
+            <article>
+                <p class="info">请先在左侧输入查询，再从检索结果中选择一条记录查看详情。</p>
+            </article>
+        </div>
+    </div>
+</div>
+
+<dialog id="data-form-modal">
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" hx-post="/api/close_modal" hx-target="#data-form-modal" hx-swap="none"></button>
+            <h3 id="form-title">添加新数据</h3>
+        </header>
+        <form id="data-form" hx-post="/api/save_document" hx-target="#data-form-modal" hx-swap="none">
+            <input type="hidden" id="form-doc-id" name="doc_id">
+
+            <fieldset>
+                <legend>基本信息</legend>
+                <label for="form-title-input">标题
+                    <input type="text" id="form-title-input" name="title" value="无标题">
+                </label>
+                <label for="form-sender-input">发送者 / 来源
+                    <input type="text" id="form-sender-input" name="sender" value="未知">
+                </label>
+            </fieldset>
+
+            <fieldset>
+                <legend>标签管理</legend>
+                <label for="form-tags">选择已有标签
+                    <select id="form-tags" name="tags" multiple></select>
+                </label>
+                <label for="form-new-tags">新增标签（用逗号分隔）
+                    <input type="text" id="form-new-tags" name="new_tags" placeholder="例如：重要, 待办, 工作">
+                </label>
+            </fieldset>
+
+            <fieldset>
+                <legend>扩展字段</legend>
+                <div id="dynamic-fields"></div>
+            </fieldset>
+
+            <fieldset>
+                <legend>内容</legend>
+                <label for="form-content">正文
+                    <textarea id="form-content" name="content" rows="10" required></textarea>
+                </label>
+            </fieldset>
+
+            <div class="grid">
+                <button type="submit" class="primary">保存</button>
+                <button type="button" class="secondary" hx-post="/api/close_modal" hx-target="#data-form-modal" hx-swap="none">取消</button>
+            </div>
+        </form>
+    </article>
+</dialog>
+{% endblock %}

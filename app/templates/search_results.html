@@ -1,0 +1,17 @@
+{% for result in results %}
+<div class="result-card" hx-get="/api/view/{{ result.chunk_id }}" hx-target="#content-display" hx-swap="innerHTML">
+    <h4 id="search-results-title">{{ result.title }}</h4>
+    <div class="meta">
+        {{ result.source }} | {{ result.timestamp or "未知时间" }} | {{ result.char_count }} 字
+    </div>
+    <div class="preview">
+        {{ result.preview }}
+    </div>
+</div>
+{% endfor %}
+
+{% if results|length == 0 %}
+<div class="result-card">
+    <p>没有找到符合当前搜索和筛选条件的结果。</p>
+</div>
+{% endif %}

@@ -1,0 +1,40 @@
+{% if data %}
+<article>
+    <header>
+        <h3>编辑记录</h3>
+        <p>保存时会同步更新 SQLite 中的原文与切片，以及 Chroma 中对应的向量。</p>
+    </header>
+
+    {% if data.error %}
+    <p class="error-message">{{ data.error }}</p>
+    {% endif %}
+
+    <form hx-put="/api/document/{{ data.doc_id }}" hx-target="#content-display" hx-swap="innerHTML">
+        <fieldset>
+            <legend>基本信息</legend>
+            <label for="edit-title-input">对话标题
+                <input type="text" id="edit-title-input" name="title" value="{{ data.title }}">
+            </label>
+            <label for="edit-sender-input">消息发送方
+                <input type="text" id="edit-sender-input" name="sender" value="{{ data.sender }}">
+            </label>
+        </fieldset>
+
+        <fieldset>
+            <legend>内容</legend>
+            <label for="edit-content">消息正文
+                <textarea id="edit-content" name="content" rows="14" required>{{ data.content }}</textarea>
+            </label>
+        </fieldset>
+
+        <div class="grid">
+            <button type="submit" class="primary">保存并重建索引</button>
+            <button type="button" hx-get="/api/view/{{ data.doc_id }}" hx-target="#content-display" hx-swap="innerHTML">取消</button>
+        </div>
+    </form>
+</article>
+{% else %}
+<article>
+    <p class="error-message">未找到可编辑的数据。</p>
+</article>
+{% endif %}
