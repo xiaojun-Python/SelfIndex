@@ -1,1 +1,1 @@
-# Utility scripts package.
+"""导入、迁移与维护脚本。"""

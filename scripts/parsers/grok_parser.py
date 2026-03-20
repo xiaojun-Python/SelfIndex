@@ -1,10 +1,14 @@
+"""Grok 导出解析器。"""
+
+from __future__ import annotations
+
 import ijson
 
 from scripts.format_timestamp import format_timestamp
 
 
 def parse_format_grok(file_path):
-    with open(file_path, "r", encoding="utf-8") as file_obj:
+    with open(file_path, "rb") as file_obj:
         objects = ijson.items(file_obj, "conversations.item")
 
         for obj in objects:

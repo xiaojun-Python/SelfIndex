@@ -1,99 +1,71 @@
+"""文本分块逻辑。
+
+当前阶段的目标不是做“最聪明”的 chunk，而是做一个稳定、可解释、可重建的切分器。
+"""
+
+from __future__ import annotations
+
 import re
 
 
-# def smart_chunking(text, title, role, min_len=30, max_len=500):
-#     # 1. 清理数据噪音
-#     text = text.strip()
-#     if not text or len(text) < 5:  # 过滤掉彻底的废话
-#         return []
-#
-#     prefix = f"[{title}] {role}: "
-#
-#     # 2. 改进的分隔符：不仅按句号，还按换行符
-#     # 这样可以保留对话的自然结构
-#     segments = re.split(r'([。！？\n])', text)
-#
-#     chunks = []
-#     current_content = ""
-#     start_ptr = 0
-#
-#     for i in range(0, len(segments) - 1, 2):
-#         sentence = segments[i] + segments[i + 1]  # 重新组合句子和标点
-#
-#         # 如果当前累加的内容太短，就继续往后加（合并短句）
-#         if len(current_content) + len(sentence) < max_len:
-#             if not current_content:
-#                 start_ptr = text.find(sentence)
-#             current_content += sentence
-#         else:
-#             # 只有达到最小长度要求才保存，防止产生“好的”、“嗯”这种碎片
-#             if len(current_content.strip()) >= min_len:
-#                 chunks.append({
-#                     "content": prefix + current_content.strip(),
-#                     "start": start_ptr,
-#                     "end": start_ptr + len(current_content)
-#                 })
-#             current_content = sentence
-#             start_ptr = text.find(sentence)
-#
-#     # 处理最后剩下的部分
-#     if len(current_content.strip()) >= min_len:
-#         chunks.append({
-#             "content": prefix + current_content.strip(),
-#             "start": start_ptr,
-#             "end": start_ptr + len(current_content)
-#         })
-#
-#     return chunks
+def smart_chunking(
+    text: str,
+    title: str,
+    role: str,
+    min_len: int = 30,
+    max_len: int = 500,
+    overlap: int = 1,
+) -> list[dict[str, int | str]]:
+    """按句子边界切分文本，并保留原文中的字符区间。
 
-def smart_chunking(text,  title, role,min_len=30, max_len=500, overlap=1):
+    `title` 和 `role` 目前还没有参与切分逻辑，但保留参数是为了兼容旧调用点，
+    也为后续更细的分块策略预留扩展位置。
+    """
+    _ = title, role
 
-    text = text.strip()
-    if not text or len(text) < 5:
-        return []
-    text = text.strip()
-    if not text or len(text) < 5:
+    cleaned = text.strip()
+    if len(cleaned) < 5:
         return []
 
-    # 切句
-    sentences = re.split(r'(?<=[。！？\n])', text)
+    sentences = re.split(r"(?<=[。！？\n])", cleaned)
 
-    chunks = []
-    current = []
+    chunks: list[dict[str, int | str]] = []
+    current: list[str] = []
     current_len = 0
     cursor = 0
 
     for sentence in sentences:
-        s_len = len(sentence)
-        if current_len + s_len <= max_len:
+        sentence_len = len(sentence)
+        if current_len + sentence_len <= max_len:
             current.append(sentence)
-            current_len += s_len
+            current_len += sentence_len
         else:
             content = "".join(current).strip()
             if len(content) >= min_len:
-                chunks.append({
-                    "content": content,
-                    "start": cursor - current_len,
-                    "end": cursor
-                })
+                chunks.append(
+                    {
+                        "content": content,
+                        "start": cursor - current_len,
+                        "end": cursor,
+                    }
+                )
 
-            # overlap
+            # 保留少量重叠句子，避免语义被切得太碎。
             current = current[-overlap:]
-            current_len = sum(len(s) for s in current)
-
+            current_len = sum(len(item) for item in current)
             current.append(sentence)
-            current_len += s_len
+            current_len += sentence_len
 
-        cursor += s_len
+        cursor += sentence_len
 
-    # 最后一个chunk
     content = "".join(current).strip()
-
     if len(content) >= min_len:
-        chunks.append({
-            "content": content,
-            "start": cursor - current_len,
-            "end": cursor
-        })
+        chunks.append(
+            {
+                "content": content,
+                "start": cursor - current_len,
+                "end": cursor,
+            }
+        )
 
     return chunks

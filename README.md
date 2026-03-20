@@ -1,81 +1,95 @@
 # SelfIndex
-项目刚从旧有版本迭代，目前可以实现的功能是：导入从ChatGPT、Grok导出而来的对话jscon格式的数据，存储到SQLite数据库里，同时向量化保存，然后通过web页面检索展示出来。
 
-SelfIndex 正在从旧的 `my_rag_story_lib` 原型项目重新整理为一个更清晰的项目结构，以便更容易地通过 API 和 LLM 编排进行扩展。
-
-## 推荐的项目结构
-
-```text
-SelfIndex/
-├── app/                 # Flask/FastAPI 服务层
-│   ├── api/             # 路由定义
-│   ├── core/            # 配置、未来 LLM 编排、提示词
-│   ├── static/          # 现有 Flask UI 的静态资源
-│   └── templates/       # 现有 Flask UI 的 HTML 模板
-├── data/                # 本地数据，不纳入 Git 版本管理
-│   ├── chroma_db/       # Chroma 持久化存储
-│   ├── raw_exports/     # 来自 ChatGPT / Grok / DeepSeek 的原始导出
-│   └── selfindex.db     # SQLite 结构化数据
-├── engine/              # RAG 引擎
-│   ├── chunker.py
-│   ├── database.py
-│   ├── embedder.py
-│   ├── init_db.py
-│   └── retriever.py
-├── scripts/             # 导入和迁移工具
-│   ├── parsers/
-│   ├── format_timestamp.py
-│   └── import_legacy_data.py
-├── legacy/              # 归档的旧实现
-├── .env.example
-├── requirements.txt
-└── README.md
-```
-
-## 为什么这个结构更好
-
-- `app/` 现在专注于服务边界，而不是混和 UI、检索和存储代码。
-- `engine/` 存放可复用的 RAG 核心代码，这使得后续迁移到 FastAPI 更加容易。
-- `data/` 清晰地分离了运行时状态和源代码。
-- `scripts/` 专门用于导入、清理和旧数据迁移工作。
-- `legacy/` 保留了旧的 `my_rag_story_lib` 快照，同时不会阻塞新的项目结构。
-
-## 针对原始方案的调整建议
-
-- 目前保留 `app/templates/` 和 `app/static/`，因为现有的 Flask UI 在过渡期间仍然有用。
-- 添加 `data/raw_exports/`，因为你现有的工作流程已经依赖于导出的归档文件。
-- 在迁移期间保留 `legacy/` 文件夹，使重构工作保持安全和可追溯。
+SelfIndex 是一个面向长期使用的个人记忆系统原型。  
+当前阶段的目标不是做一个“会扮演人格的 AI”，而是先把最小记忆链路做扎实：能保存原始资料、能生成可检索的记忆单元、能通过向量搜索找回内容，并且能回溯到原文。
 
 ## 当前状态
 
-- 旧代码已归档到 `legacy/my_rag_story_lib`。
-- SQLite 数据已复制到 `data/selfindex.db`。
-- Chroma 持久化数据已复制到 `data/chroma_db/`。
-- 原始导出归档已复制到 `data/raw_exports/`。
-- Flask 入口点现在是 `python -m app.main`。
+目前已经完成第一阶段里“建立最小记忆链路”的核心骨架：
 
-## 安装
+- 定义了 Archive Layer：`raw_documents`
+- 定义了 Memory Layer：`memory_units`
+- 保留了旧版 `conversations/messages/chunks` 作为过渡兼容层
+- 支持导入至少一种数据源：ChatGPT / OpenAI 导出
+- 支持把记忆单元写入 Chroma 向量库
+- 支持最小 JSON 检索接口和旧 Web 搜索页面
+- 支持从检索结果回溯到原始文档
+- 提供了基础自动化测试
+
+## 现在的项目结构
+
+```text
+SelfIndex/
+├── app/                 # Web 服务层（Flask）
+│   ├── api/             # 路由
+│   ├── core/            # 配置
+│   ├── static/          # 静态资源
+│   └── templates/       # 页面模板
+├── data/                # 本地运行数据
+│   ├── chroma_db/       # 向量索引
+│   ├── raw_exports/     # 导出文件
+│   └── selfindex.db     # SQLite 数据库
+├── docs/                # 项目说明文档
+├── engine/              # 数据模型、检索与记忆链路
+├── scripts/             # 导入与格式解析
+├── tests/               # 基础测试
+└── README.md
+```
+
+## 运行方式
+
+安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-将 `.env.example` 复制为 `.env` 并根据需要调整配置值。
-
-## 运行应用
+启动 Web：
 
 ```bash
 python -m app.main
 ```
 
-## 导入旧数据
+导入导出文件：
 
 ```bash
-python -m scripts.import_legacy_data --file data/raw_exports/chatgpt_data-2026-03-10.json
+python -m scripts.import_legacy_data --file data/raw_exports/your_export.json
 ```
 
-## 下一步建议
+运行测试：
 
-- 决定 `app/` 是继续保持 Flask 优先还是完全迁移到 FastAPI。
-- 在确定提供商策略后，添加 `app/core/llm.py`。
-- 在进行更深入的功能开发之前，先为导入、分块和检索添加测试。
+```bash
+python -m unittest discover -s tests -v
+```
+
+## 接口
+
+旧页面继续使用：
+
+- `GET /`
+- `GET /api/search`
+
+新的最小记忆接口：
+
+- `GET /api/memory/search?query=...&limit=10`
+- `GET /api/memory/<memory_unit_id>`
+
+## 现在最值得先理解什么
+
+如果你要重新建立对项目的掌控感，建议按这个顺序读：
+
+1. [docs/current-system.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/current-system.md)
+2. [docs/code-map.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/code-map.md)
+3. [docs/architecture.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/architecture.md)
+
+## 这次重构的意义
+
+现在的 Web 用起来和旧版很像，这是正常的。  
+这轮工作的重点不是“外观变化”，而是把内部结构从“聊天记录搜索工具”推进到“有 Archive / Memory 分层的记忆系统雏形”。
+
+一句话说：
+
+- 旧版更像“把对话切块后拿来搜”
+- 现在开始变成“保存原始文档，再从原始文档中生成可重建的记忆单元”
+
+这会直接决定后面能不能继续做摘要、标签、实体、关系、解释性排序，以及多数据源接入。

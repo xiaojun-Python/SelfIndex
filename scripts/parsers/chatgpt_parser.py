@@ -1,10 +1,15 @@
+"""ChatGPT / OpenAI 导出解析器。"""
+
+from __future__ import annotations
+
 import ijson
 
 from scripts.format_timestamp import format_timestamp
 
 
 def parse_format_openai(file_path):
-    with open(file_path, "r", encoding="utf-8") as file_obj:
+    """逐条读取 OpenAI 导出文件，避免一次性载入超大 JSON。"""
+    with open(file_path, "rb") as file_obj:
         objects = ijson.items(file_obj, "item")
 
         for obj in objects:
@@ -27,7 +32,7 @@ def parse_format_openai(file_path):
                     continue
 
                 parts = message_obj.get("content", {}).get("parts", [])
-                text_content = "".join([part for part in parts if isinstance(part, str)])
+                text_content = "".join(part for part in parts if isinstance(part, str))
                 if not text_content:
                     continue
 

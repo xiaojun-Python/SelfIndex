@@ -1,1 +1,1 @@
-# Core application settings and service wiring.
+"""应用配置与未来核心能力所在的包。"""

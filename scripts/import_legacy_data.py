@@ -1,33 +1,29 @@
+"""导入脚本。
+
+当前这条链路会把导出文件中的消息：
+1. 标准化成 raw document
+2. 切分成 memory units
+3. 写入 SQLite
+4. 写入 Chroma 向量索引
+"""
+
+from __future__ import annotations
+
 import argparse
-import hashlib
-import json
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from app.core.settings import settings
-from engine.chunker import smart_chunking
 from engine.database import DatabaseManager, VectorManager
-from engine.embedder import embedding_manager
+from engine.memory import build_memory_units, build_raw_document
 from scripts.parsers.chatgpt_parser import parse_format_openai
 from scripts.parsers.deepseek_parser import parse_format_deepseek
 from scripts.parsers.grok_parser import parse_format_grok
 
-db = DatabaseManager(settings.sqlite_db_path)
-vector_db = VectorManager(settings.chroma_db_path)
-
-
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return float(obj)
-        return super().default(obj)
-
-
-def get_content_hash(text: str) -> str:
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
-
 
 def select_parser(file_path: str):
+    """根据文件名做一个当前阶段足够简单的解析器选择。"""
     lower_path = file_path.lower()
     if "grok" in lower_path:
         return parse_format_grok
@@ -36,121 +32,133 @@ def select_parser(file_path: str):
     return parse_format_openai
 
 
-def run_import(file_path: str) -> None:
-    parser = select_parser(file_path)
-    success_count = 0
+def _as_json_ready(value: Any) -> Any:
+    """把 Decimal 等对象转换为可序列化的普通结构。"""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {key: _as_json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_as_json_ready(item) for item in value]
+    return value
 
-    for conv_meta, messages in parser(file_path):
-        try:
-            raw_meta_json = json.dumps(
-                conv_meta["raw_meta"],
-                ensure_ascii=False,
-                cls=DecimalEncoder,
+
+def _get_embedder(embedder: Any = None) -> Any:
+    if embedder is not None:
+        return embedder
+
+    from engine.embedder import embedding_manager
+
+    return embedding_manager
+
+
+def import_export_file(
+    file_path: str | Path,
+    *,
+    sqlite_db: DatabaseManager,
+    vector_db: VectorManager,
+    embedder: Any = None,
+) -> dict[str, int]:
+    """导入单个导出文件，并返回本次写入的数据量。"""
+    parser = select_parser(str(file_path))
+    embedder = _get_embedder(embedder)
+
+    imported_documents = 0
+    imported_memory_units = 0
+
+    for conv_meta, messages in parser(str(file_path)):
+        for message in messages:
+            content = (message.get("content") or "").strip()
+            if not content:
+                continue
+
+            raw_document = build_raw_document(
+                source=str(conv_meta.get("source") or "unknown"),
+                source_type="conversation_message",
+                external_id=str(message["message_id"]),
+                root_document_id=str(conv_meta.get("id") or "") or None,
+                title=conv_meta.get("title"),
+                author=message.get("sender_type"),
+                created_at=message.get("timestamp") or conv_meta.get("created_at"),
+                content=content,
+                raw_payload={
+                    "conversation": _as_json_ready(conv_meta),
+                    "message": _as_json_ready(message),
+                },
+                metadata={
+                    "model": message.get("model"),
+                    "sequence": message.get("sequence"),
+                    "sub_title": message.get("sub_title"),
+                },
             )
-            conv_tuple = (
-                conv_meta["id"],
-                conv_meta["title"],
-                conv_meta["created_at"],
-                conv_meta["source"],
-                raw_meta_json,
+
+            memory_units = build_memory_units(
+                raw_document,
+                embedding_version=settings.embedding_model,
             )
-            msg_tuples = [
-                (
-                    msg["message_id"],
-                    conv_meta["id"],
-                    msg["sub_title"],
-                    msg["sender_type"],
-                    msg["content"],
-                    msg["content_length"],
-                    msg["model"],
-                    get_content_hash(msg["content"]),
-                    msg["sequence"],
-                    msg["timestamp"],
+
+            sqlite_db.upsert_raw_document(raw_document)
+            old_memory_unit_ids = sqlite_db.replace_memory_units(
+                raw_document["raw_document_id"],
+                memory_units,
+            )
+
+            if old_memory_unit_ids:
+                vector_db.delete_vectors(old_memory_unit_ids)
+
+            if memory_units:
+                texts = [unit["content"] for unit in memory_units]
+                embeddings = embedder.embed_documents(texts)
+                metadatas = [
+                    {
+                        "memory_unit_id": unit["memory_unit_id"],
+                        "raw_document_id": unit["raw_document_id"],
+                        "title": raw_document.get("title") or "Untitled document",
+                        "source": raw_document["source"],
+                        "source_type": raw_document["source_type"],
+                        "author": raw_document.get("author") or "",
+                        "created_at": raw_document.get("created_at") or "",
+                        "summary": unit.get("summary") or "",
+                    }
+                    for unit in memory_units
+                ]
+                vector_db.add_vectors(
+                    ids=[unit["memory_unit_id"] for unit in memory_units],
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                    documents=texts,
                 )
-                for msg in messages
-            ]
-            db.save_full_conversation(conv_tuple, msg_tuples)
-            success_count += 1
-        except Exception as exc:
-            print(f"Import failed for one conversation: {exc}")
-
-    print(f"Imported conversations: {success_count}")
-
-
-def run_chunking_task() -> None:
-    pending_msgs = db.get_messages_needing_chunks()
-    all_new_chunks = []
-
-    for msg in pending_msgs:
-        chunks = smart_chunking(msg["content"], msg["title"], msg["sender_type"])
-        for index, chunk in enumerate(chunks):
-            chunk_hash = get_content_hash(chunk["content"])
-            if not db.chunk_exists(chunk_hash):
-                all_new_chunks.append(
-                    (
-                        msg["message_id"],
-                        index,
-                        chunk["start"],
-                        chunk["end"],
-                        chunk["content"],
-                        chunk_hash,
-                        settings.embedding_model,
-                    )
+                sqlite_db.mark_memory_units_as_embedded(
+                    [unit["memory_unit_id"] for unit in memory_units]
                 )
 
-    if all_new_chunks:
-        db.save_chunks(all_new_chunks)
-    print(f"Chunks created: {len(all_new_chunks)}")
+            imported_documents += 1
+            imported_memory_units += len(memory_units)
 
-
-def run_embedding_task() -> None:
-    while True:
-        chunks_to_process = db.get_unprocessed_chunks(limit=100)
-        if not chunks_to_process:
-            print("All chunks are embedded.")
-            break
-
-        texts = [item["content"] for item in chunks_to_process]
-        ids = [str(item["chunk_id"]) for item in chunks_to_process]
-        metadatas = [
-            {
-                "message_id": item["message_id"],
-                "title": item["title"] or "Untitled conversation",
-                "source": item["source"],
-                "timestamp": item["timestamp"],
-            }
-            for item in chunks_to_process
-        ]
-        vectors = embedding_manager.embed_documents(texts)
-        vector_db.add_vectors(ids=ids, embeddings=vectors, metadatas=metadatas, documents=texts)
-        db.mark_chunks_as_processed([item["chunk_id"] for item in chunks_to_process])
-        print(f"Embedded chunks: {len(chunks_to_process)}")
+    return {
+        "raw_documents": imported_documents,
+        "memory_units": imported_memory_units,
+    }
 
 
 def build_cli() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Import legacy exports into the new SelfIndex layout.")
-    parser.add_argument("--file", type=str, help="Path to the exported JSON file.")
-    parser.add_argument("--import-only", action="store_true", help="Only run import.")
-    parser.add_argument("--chunk-only", action="store_true", help="Only run chunking.")
-    parser.add_argument("--embed-only", action="store_true", help="Only run embedding.")
+    parser = argparse.ArgumentParser(
+        description="Import conversation exports into SelfIndex archive and memory layers."
+    )
+    parser.add_argument("--file", required=True, type=str, help="Path to the exported JSON file.")
     return parser
 
 
 if __name__ == "__main__":
     args = build_cli().parse_args()
-
-    if args.file:
-        run_import(str(Path(args.file)))
-
-    if args.import_only:
-        raise SystemExit(0)
-    if args.chunk_only:
-        run_chunking_task()
-        raise SystemExit(0)
-    if args.embed_only:
-        run_embedding_task()
-        raise SystemExit(0)
-
-    if args.file:
-        run_chunking_task()
-        run_embedding_task()
+    sqlite_db = DatabaseManager(settings.sqlite_db_path)
+    vector_db = VectorManager(settings.chroma_db_path)
+    result = import_export_file(
+        args.file,
+        sqlite_db=sqlite_db,
+        vector_db=vector_db,
+    )
+    print(
+        "Imported raw documents: "
+        f"{result['raw_documents']}, memory units: {result['memory_units']}"
+    )

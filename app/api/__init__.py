@@ -1,1 +1,1 @@
-# API package for Flask routes.
+"""API 路由包。"""

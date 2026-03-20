@@ -1,3 +1,7 @@
+"""本地开发入口。"""
+
+from __future__ import annotations
+
 from app import create_app
 from app.core.settings import settings
 

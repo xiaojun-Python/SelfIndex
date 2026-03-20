@@ -1,3 +1,12 @@
+"""Flask 路由。
+
+这里同时承载两类接口：
+- 旧 UI 继续使用的 HTML/HTMX 路由
+- 新记忆链路暴露出来的最小 JSON API
+"""
+
+from __future__ import annotations
+
 import hashlib
 import json
 
@@ -5,8 +14,13 @@ from flask import Blueprint, current_app, jsonify, render_template, request
 from markdown import markdown
 
 from engine.chunker import smart_chunking
-from engine.embedder import embedding_manager
-from engine.retriever import normalize_timestamp, parse_filters, search
+from engine.retriever import (
+    get_memory_unit_payload,
+    normalize_timestamp,
+    parse_filters,
+    search,
+    search_memory,
+)
 
 bp = Blueprint("main", __name__)
 EMBEDDING_VERSION = "bge-small-zh-v1.5"
@@ -17,6 +31,7 @@ def _hash_text(text: str) -> str:
 
 
 def _render_search_results():
+    """兼容旧模板的搜索结果渲染。"""
     query = (request.args.get("query") or "").strip()
     filters = parse_filters(request.args)
     results = search(
@@ -29,9 +44,11 @@ def _render_search_results():
 
 
 def _build_chunks_for_message(content: str) -> list[dict]:
+    """旧 UI 编辑消息后，重新生成对应的 chunks。"""
     chunks = smart_chunking(content, "", "")
     if not chunks and content.strip():
-        chunks = [{"content": content.strip(), "start": 0, "end": len(content.strip())}]
+        stripped = content.strip()
+        chunks = [{"content": stripped, "start": 0, "end": len(stripped)}]
 
     return [
         {
@@ -47,6 +64,9 @@ def _build_chunks_for_message(content: str) -> list[dict]:
 
 
 def _vector_payload(chunk_rows: list[dict], message_row: dict, conversation_row: dict):
+    """为旧 UI 编辑保存后的 chunk 重新准备向量数据。"""
+    from engine.embedder import embedding_manager
+
     texts = [chunk["content"] for chunk in chunk_rows]
     embeddings = embedding_manager.embed_documents(texts) if texts else []
     metadatas = [
@@ -63,6 +83,7 @@ def _vector_payload(chunk_rows: list[dict], message_row: dict, conversation_row:
 
 
 def _restore_vectors(vector_db, old_vector_state):
+    """编辑失败回滚时，把旧向量重新放回去。"""
     old_ids = old_vector_state.get("ids") or []
     if not old_ids:
         return
@@ -76,6 +97,7 @@ def _restore_vectors(vector_db, old_vector_state):
 
 
 def _render_document_by_chunk(chunk_id, notice=None):
+    """兼容旧 UI：按 chunk 查看完整消息。"""
     sqlite_db = current_app.config["SQLITE_DB"]
     detail = sqlite_db.get_message_detail_by_chunk(chunk_id)
     if not detail:
@@ -114,6 +136,36 @@ def update_filters():
     return _render_search_results()
 
 
+@bp.route("/api/memory/search")
+def search_memory_view():
+    """新版最小检索接口。"""
+    query = (request.args.get("query") or "").strip()
+    try:
+        limit = max(1, min(int(request.args.get("limit", 10)), 50))
+    except ValueError:
+        limit = 10
+
+    results = search_memory(
+        sqlite_db=current_app.config["SQLITE_DB"],
+        vector_db=current_app.config["VECTOR_DB"],
+        query=query,
+        limit=limit,
+    )
+    return jsonify({"query": query, "count": len(results), "results": results})
+
+
+@bp.route("/api/memory/<memory_unit_id>")
+def memory_unit_detail(memory_unit_id):
+    """返回记忆单元和原始文档的完整回溯信息。"""
+    payload = get_memory_unit_payload(
+        current_app.config["SQLITE_DB"],
+        memory_unit_id,
+    )
+    if payload is None:
+        return jsonify({"error": "Memory unit not found."}), 404
+    return jsonify(payload)
+
+
 @bp.route("/api/view/<chunk_id>")
 def view_document(chunk_id):
     return _render_document_by_chunk(chunk_id)
@@ -121,6 +173,7 @@ def view_document(chunk_id):
 
 @bp.route("/api/edit/<chunk_id>")
 def edit_document(chunk_id):
+    """兼容旧 UI 的编辑表单。"""
     sqlite_db = current_app.config["SQLITE_DB"]
     detail = sqlite_db.get_message_detail_by_chunk(chunk_id)
     if not detail:
@@ -147,6 +200,11 @@ def edit_document(chunk_id):
 
 @bp.route("/api/document/<chunk_id>", methods=["PUT"])
 def update_document(chunk_id):
+    """兼容旧 UI 的消息编辑保存。
+
+    这部分仍然基于旧的 messages/chunks 表工作，后续如果全面切到新模型，
+    可以再把它统一收敛。
+    """
     sqlite_db = current_app.config["SQLITE_DB"]
     vector_db = current_app.config["VECTOR_DB"]
 

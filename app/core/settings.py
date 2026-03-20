@@ -1,3 +1,10 @@
+"""项目配置。
+
+所有运行时路径和主要参数都从这里集中读取，便于统一理解和排查。
+"""
+
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +24,8 @@ def _as_bool(value: str | None, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
+    """集中保存项目用到的路径、服务和检索配置。"""
+
     base_dir: Path = BASE_DIR
     data_dir: Path = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
     sqlite_db_path: Path = Path(os.getenv("SQLITE_DB_PATH", str(BASE_DIR / "data" / "selfindex.db")))

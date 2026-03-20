@@ -1,7 +1,13 @@
+"""时间格式标准化工具。"""
+
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any
 
 
-def format_timestamp(ts_data):
+def format_timestamp(ts_data: Any) -> str:
+    """把导出文件里常见的时间格式统一成字符串。"""
     if not ts_data:
         return ""
 

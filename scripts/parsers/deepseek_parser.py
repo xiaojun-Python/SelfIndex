@@ -1,1 +1,3 @@
+"""DeepSeek 当前沿用 OpenAI 导出格式。"""
+
 from scripts.parsers.chatgpt_parser import parse_format_openai as parse_format_deepseek
