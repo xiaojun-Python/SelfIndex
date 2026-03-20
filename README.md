@@ -1,4 +1,5 @@
 # SelfIndex
+项目刚从旧有版本迭代，目前可以实现的功能是：导入从ChatGPT、Grok导出而来的对话jscon格式的数据，存储到SQLite数据库里，同时向量化保存，然后通过web页面检索展示出来。
 
 SelfIndex 正在从旧的 `my_rag_story_lib` 原型项目重新整理为一个更清晰的项目结构，以便更容易地通过 API 和 LLM 编排进行扩展。
 
