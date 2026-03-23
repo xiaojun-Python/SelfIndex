@@ -62,9 +62,12 @@ def build_memory_units(
     *,
     embedding_version: str,
     unit_type: str = "chunk",
+    protected_terms: list[str] | None = None,
+    protected_domain: str = "identity",
 ) -> list[dict[str, Any]]:
     """从一条原始文档中切出多条记忆单元。"""
     content = raw_document["content"]
+    protected_terms = protected_terms or []
     chunks = smart_chunking(
         content,
         raw_document.get("title") or "",
@@ -91,16 +94,26 @@ def build_memory_units(
         "created_at": raw_document.get("created_at"),
     }
 
+    protected_terms_lower = [term.lower() for term in protected_terms if term]
+
     memory_units: list[dict[str, Any]] = []
     for index, chunk in enumerate(chunks):
+        chunk_content = chunk["content"]
+        recall_domain = "default"
+        if protected_terms_lower:
+            lowered = chunk_content.lower()
+            if any(term in lowered for term in protected_terms_lower):
+                recall_domain = protected_domain
+
         memory_units.append(
             {
                 "memory_unit_id": f"{raw_document['raw_document_id']}:{index}",
                 "raw_document_id": raw_document["raw_document_id"],
                 "unit_index": index,
                 "unit_type": unit_type,
-                "content": chunk["content"],
-                "summary": build_summary(chunk["content"]),
+                "recall_domain": recall_domain,
+                "content": chunk_content,
+                "summary": build_summary(chunk_content),
                 "start_char": chunk["start"],
                 "end_char": chunk["end"],
                 "embedding_version": embedding_version,

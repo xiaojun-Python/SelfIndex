@@ -95,6 +95,7 @@ def import_export_file(
             memory_units = build_memory_units(
                 raw_document,
                 embedding_version=settings.embedding_model,
+                protected_terms=settings.protected_terms,
             )
 
             sqlite_db.upsert_raw_document(raw_document)
@@ -119,6 +120,7 @@ def import_export_file(
                         "author": raw_document.get("author") or "",
                         "created_at": raw_document.get("created_at") or "",
                         "summary": unit.get("summary") or "",
+                        "recall_domain": unit.get("recall_domain") or "default",
                     }
                     for unit in memory_units
                 ]

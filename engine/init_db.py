@@ -34,6 +34,7 @@ TABLE_SCHEMAS = [
         raw_document_id TEXT NOT NULL,
         unit_index INTEGER NOT NULL,
         unit_type TEXT NOT NULL DEFAULT 'chunk',
+        recall_domain TEXT NOT NULL DEFAULT 'default',
         content TEXT NOT NULL,
         summary TEXT,
         start_char INTEGER NOT NULL,
@@ -123,3 +124,11 @@ def init_database(db_path: str | Path) -> None:
             cursor.execute(sql)
         for idx_sql in INDEXES:
             cursor.execute(idx_sql)
+
+        # Lightweight migrations for existing DBs.
+        cursor.execute("PRAGMA table_info(memory_units)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if "recall_domain" not in existing_columns:
+            cursor.execute(
+                "ALTER TABLE memory_units ADD COLUMN recall_domain TEXT NOT NULL DEFAULT 'default'"
+            )

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,6 +21,13 @@ def _as_bool(value: str | None, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _as_csv_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    parts = [part.strip() for part in value.split(",")]
+    return [part for part in parts if part]
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,12 @@ class Settings:
     debug: bool = _as_bool(os.getenv("DEBUG"), True)
     host: str = os.getenv("HOST", "127.0.0.1")
     port: int = int(os.getenv("PORT", "5000"))
+
+    # Unlock-style query syntax.
+    protected_terms: list[str] = field(default_factory=lambda: _as_csv_list(os.getenv("PROTECTED_TERMS")))
+    unlock_prefix_identity: str = os.getenv("UNLOCK_PREFIX_IDENTITY", ":")
+    unlock_prefix_sensitive: str = os.getenv("UNLOCK_PREFIX_SENSITIVE", "!")
+    search_debug: bool = _as_bool(os.getenv("SEARCH_DEBUG"), False)
 
 
 settings = Settings()

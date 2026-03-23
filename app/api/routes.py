@@ -40,7 +40,11 @@ def _render_search_results():
         query=query,
         filters=filters,
     )
-    return render_template("search_results.html", results=results)
+    return render_template(
+        "search_results.html",
+        results=results,
+        search_debug=current_app.config["SETTINGS"].search_debug,
+    )
 
 
 def _build_chunks_for_message(content: str) -> list[dict]:

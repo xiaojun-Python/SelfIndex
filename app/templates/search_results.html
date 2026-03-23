@@ -4,6 +4,11 @@
     <div class="meta">
         {{ result.source }} | {{ result.timestamp or "未知时间" }} | {{ result.char_count }} 字
     </div>
+    {% if search_debug %}
+    <div class="meta meta-debug">
+        domain={{ result.recall_domain }} | memory={{ result.memory_unit_id }} | raw={{ result.raw_document_id }}
+    </div>
+    {% endif %}
     <div class="preview">
         {{ result.preview }}
     </div>

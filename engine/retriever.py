@@ -11,6 +11,7 @@ from typing import Any
 
 from app.core.settings import settings
 from engine.memory import build_summary
+from engine.query_syntax import parse_unlock_prefixes
 
 VALID_SORTS = {"default", "time_asc", "time_desc"}
 PREVIEW_LENGTH = 120
@@ -119,14 +120,22 @@ def search_memory(
     embedder: Any = None,
 ) -> list[dict[str, Any]]:
     """新检索接口的核心实现。"""
-    if not query.strip():
+    parsed = parse_unlock_prefixes(
+        query,
+        identity_prefix=settings.unlock_prefix_identity,
+        sensitive_prefix=settings.unlock_prefix_sensitive,
+    )
+    if not parsed.cleaned.strip():
         return []
 
     embedder = _get_embedder(embedder)
-    query_vector = embedder.embed_query(query)
+    query_vector = embedder.embed_query(parsed.cleaned)
+
+    requested_limit = limit or settings.default_search_k
+    n_results = max(requested_limit, min(settings.default_search_k, requested_limit * 10))
     raw_results = vector_db.search(
         query_vector,
-        n_results=limit or settings.default_search_k,
+        n_results=n_results,
     )
 
     ids = raw_results.get("ids") or []
@@ -143,6 +152,9 @@ def search_memory(
         detail = sqlite_db.get_memory_unit_detail(memory_unit_id)
         if detail is None:
             continue
+        detail_domain = detail["recall_domain"] if "recall_domain" in detail.keys() else "default"
+        if (detail_domain or "default") not in parsed.allowed_domains:
+            continue
 
         results.append(
             {
@@ -152,13 +164,14 @@ def search_memory(
                 "summary": metadata.get("summary")
                 or detail["summary"]
                 or build_summary(detail["memory_content"]),
-                "preview": build_preview(detail["memory_content"], query),
+                "preview": build_preview(detail["memory_content"], parsed.cleaned),
                 "source": detail["source"],
                 "source_type": detail["source_type"],
                 "title": detail["title"] or "Untitled document",
                 "author": detail["author"] or "",
                 "created_at": normalize_timestamp(detail["created_at"]),
                 "raw_document_id": detail["raw_document_id"],
+                "recall_domain": detail_domain or "default",
                 "trace": {
                     "raw_document_id": detail["raw_document_id"],
                     "external_id": detail["external_id"],
@@ -169,7 +182,7 @@ def search_memory(
             }
         )
 
-    return results[: limit or settings.max_results_display]
+    return results[: requested_limit if limit is not None else settings.max_results_display]
 
 
 def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, Any] | None:
@@ -188,6 +201,7 @@ def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, An
             "raw_document_id": detail["raw_document_id"],
             "unit_index": detail["unit_index"],
             "unit_type": detail["unit_type"],
+            "recall_domain": detail["recall_domain"] if "recall_domain" in detail.keys() else "default",
             "content": detail["memory_content"],
             "summary": detail["summary"],
             "start_char": detail["start_char"],
@@ -229,6 +243,9 @@ def search(sqlite_db: Any, vector_db: Any, query: str, filters: dict[str, Any]) 
     normalized_results = [
         {
             "chunk_id": item["memory_unit_id"],
+            "memory_unit_id": item["memory_unit_id"],
+            "raw_document_id": item["raw_document_id"],
+            "recall_domain": item["recall_domain"],
             "content": item["content"],
             "preview": item["preview"],
             "title": item["title"],

@@ -62,6 +62,62 @@ python -m scripts.import_legacy_data --file data/raw_exports/your_export.json
 python -m unittest discover -s tests -v
 ```
 
+## 解锁式查询
+
+SelfIndex 现在支持“解锁式查询”。
+
+- 默认查询只会检索 `default` 召回域
+- 带前缀的查询才会额外解锁受保护的召回域
+- 当前内置的召回域包括 `default`、`identity`、`sensitive`
+
+前缀由环境变量控制：
+
+```env
+UNLOCK_PREFIX_IDENTITY=:
+UNLOCK_PREFIX_SENSITIVE=!
+```
+
+实际调用链是：
+
+- `app/core/settings.py` 读取环境变量
+- `engine/retriever.py` 把前缀配置传给 `engine/query_syntax.py`
+- `engine/query_syntax.py` 只负责解析，不直接读取环境变量
+
+这样做的好处是查询解析层保持纯粹，配置来源则统一留在 `settings`。
+
+## Recall Domain
+
+`memory_units.recall_domain` 用来表示一条记忆属于哪个召回域。
+
+- `default`：默认可检索
+- `identity`：需要显式解锁后才允许召回的身份类信息
+- `sensitive`：需要显式解锁后才允许召回的敏感信息
+
+这里存的是“域名”，不是某个具体命中的关键词。  
+例如命中 `PROTECTED_TERMS` 后，`recall_domain` 应该写成 `identity` 或 `sensitive`，而不是直接写成某个具体词。
+
+## 回填现有数据
+
+如果你已经有旧数据，可以用回填脚本按当前 `PROTECTED_TERMS` 重算 `memory_units.recall_domain`。
+
+先看会改多少条：
+
+```bash
+python -m scripts.backfill_recall_domains --dry-run
+```
+
+真正写入数据库：
+
+```bash
+python -m scripts.backfill_recall_domains
+```
+
+当前脚本规则是：
+
+- `memory_units.content` 包含任一 `PROTECTED_TERMS`
+- 命中则设为 `sensitive`
+- 未命中则设回 `default`
+
 ## 接口
 
 旧页面继续使用：

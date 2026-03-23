@@ -166,6 +166,7 @@ class DatabaseManager:
                     raw_document_id,
                     unit_index,
                     unit_type,
+                    recall_domain,
                     content,
                     summary,
                     start_char,
@@ -173,7 +174,7 @@ class DatabaseManager:
                     embedding_version,
                     metadata_json,
                     is_embedded
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -181,6 +182,7 @@ class DatabaseManager:
                         unit["raw_document_id"],
                         unit["unit_index"],
                         unit["unit_type"],
+                        unit.get("recall_domain") or "default",
                         unit["content"],
                         unit.get("summary"),
                         unit["start_char"],
@@ -225,7 +227,7 @@ class DatabaseManager:
             return conn.execute(
                 """
                 SELECT memory_unit_id, raw_document_id, unit_index, unit_type, content,
-                       summary, start_char, end_char, embedding_version, metadata_json,
+                       recall_domain, summary, start_char, end_char, embedding_version, metadata_json,
                        created_at, updated_at, is_embedded
                 FROM memory_units
                 WHERE memory_unit_id = ?
@@ -243,6 +245,7 @@ class DatabaseManager:
                     mu.raw_document_id,
                     mu.unit_index,
                     mu.unit_type,
+                    mu.recall_domain,
                     mu.content AS memory_content,
                     mu.summary,
                     mu.start_char,
@@ -273,7 +276,7 @@ class DatabaseManager:
             return conn.execute(
                 """
                 SELECT memory_unit_id, raw_document_id, unit_index, unit_type, content,
-                       summary, start_char, end_char, embedding_version, metadata_json,
+                       recall_domain, summary, start_char, end_char, embedding_version, metadata_json,
                        created_at, updated_at, is_embedded
                 FROM memory_units
                 WHERE raw_document_id = ?

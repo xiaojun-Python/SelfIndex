@@ -410,6 +410,12 @@ h2.secondary {
   font-size: 10px;               /* 小字号，用于次要信息 */
 }
 
+.meta-debug {
+  color: #6b7280;
+  font-family: Consolas, "Courier New", monospace;
+  word-break: break-all;
+}
+
 /* 预览文本样式 */
 .preview {
   font-size: 13px;               /* 字体大小 */
