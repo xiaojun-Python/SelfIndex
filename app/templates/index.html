@@ -6,20 +6,37 @@
         <form id="search-form">
             <input type="hidden" id="sort-input" name="sort" value="default">
 
-            <input
-                type="search"
-                id="search-input"
-                name="query"
-                placeholder="输入关键词或句子，搜索本地知识库..."
-                hx-get="/api/search"
-                hx-trigger="keyup changed delay:300ms, search"
-                hx-target="#search-results"
-                hx-include="#search-form"
-            >
+            <div class="search-shell">
+                <span class="search-shell-icon search-shell-icon-left" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                        <path d="M10.5 4a6.5 6.5 0 1 0 4.03 11.6l3.43 3.43 1.41-1.41-3.43-3.43A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"></path>
+                    </svg>
+                </span>
+                <input
+                    type="search"
+                    id="search-input"
+                    name="query"
+                    placeholder="输入关键词或句子，搜索本地知识库..."
+                    hx-get="/api/search"
+                    hx-trigger="keyup changed delay:300ms, search"
+                    hx-target="#search-results"
+                    hx-include="#search-form"
+                >
+                <button
+                    type="button"
+                    id="filter-toggle"
+                    class="search-shell-icon search-shell-icon-button is-hidden"
+                    aria-label="打开筛选"
+                    aria-expanded="false"
+                    aria-controls="filter-panel"
+                >
+                    <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                        <path d="M3 5h18l-7 8v5l-4 2v-7L3 5Z"></path>
+                    </svg>
+                </button>
+            </div>
 
-            <details class="filter-details">
-                <summary>筛选</summary>
-
+            <div id="filter-panel" class="filter-panel" aria-hidden="true">
                 <div class="filter-row filter-row-icons">
                     <button
                         type="button"
@@ -57,7 +74,9 @@
                     >
                         最新
                     </button>
+                </div>
 
+                <div class="filter-row filter-row-dates">
                     <select
                         class="filter-select"
                         name="min_length"
@@ -72,9 +91,6 @@
                         <option value="100">100 字以上</option>
                         <option value="200">200 字以上</option>
                     </select>
-                </div>
-
-                <div class="filter-row filter-row-dates">
                     <input
                         id="start-date"
                         type="date"
@@ -97,7 +113,7 @@
                         hx-include="#search-form"
                     >
                 </div>
-            </details>
+            </div>
         </form>
 
         <div id="search-results" class="results-container"></div>
@@ -160,4 +176,53 @@
         </form>
     </article>
 </dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const searchInput = document.getElementById("search-input");
+    const filterToggle = document.getElementById("filter-toggle");
+    const filterPanel = document.getElementById("filter-panel");
+    const searchForm = document.getElementById("search-form");
+
+    if (!searchInput || !filterToggle || !filterPanel || !searchForm) {
+        return;
+    }
+
+    const closePanel = () => {
+        filterPanel.classList.remove("is-open");
+        filterPanel.setAttribute("aria-hidden", "true");
+        filterToggle.setAttribute("aria-expanded", "false");
+    };
+
+    const updateFilterAvailability = () => {
+        const hasQuery = searchInput.value.trim().length > 0;
+        filterToggle.classList.toggle("is-hidden", !hasQuery);
+        if (!hasQuery) {
+            closePanel();
+        }
+    };
+
+    filterToggle.addEventListener("click", () => {
+        if (filterToggle.classList.contains("is-hidden")) {
+            return;
+        }
+        const willOpen = !filterPanel.classList.contains("is-open");
+        filterPanel.classList.toggle("is-open", willOpen);
+        filterPanel.setAttribute("aria-hidden", willOpen ? "false" : "true");
+        filterToggle.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    });
+
+    searchInput.addEventListener("input", updateFilterAvailability);
+
+    document.addEventListener("click", (event) => {
+        if (!searchForm.contains(event.target)) {
+            closePanel();
+        }
+    });
+
+    updateFilterAvailability();
+});
+</script>
 {% endblock %}

@@ -159,6 +159,8 @@ main {
    * - flex-basis: auto 根据内容尺寸自动调整
    */
   flex: 0 0 auto;
+
+  margin-bottom: 0;
   
   /* 同样的 sticky 定位，确保这些元素在滚动时固定在顶部 */
   position: sticky;
@@ -180,42 +182,111 @@ main {
    ============================================
 */
 
-#search-input {
+.search-shell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
   margin: 0.2rem 0.35rem 0;
-  width: calc(100% - 0.7rem);
-  min-height: 2.7rem;
+  padding: 0.22rem;
+  min-height: 3.25rem;
+  border: 1px solid #d7dce2;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
-
-/* ============================================
-   第八部分：折叠细节元素样式 (Details Element)
-   ============================================
-   HTML <details> 元素用于创建可折叠的过滤区域
-*/
-
-.filter-details {
-  margin: 0 0.35rem;
-  border: 1px solid #e6e8eb;
-  border-radius: 10px;
-  background: #fafbfc;
-  padding: 0.1rem 0.15rem;
+.search-shell-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #5b6575;
 }
 
-.filter-details summary {
+.search-shell-icon svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: currentColor;
+}
+
+.search-shell-icon-left {
+  pointer-events: none;
+}
+
+.search-shell-icon-button {
+  border: none;
   cursor: pointer;
-  list-style: none;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #4b5563;
-  padding: 0.35rem 0.45rem;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
-.filter-details summary::-webkit-details-marker {
-  display: none;
+.search-shell-icon-button:hover {
+  background: #dbe4ef;
+  color: #1f2937;
 }
 
-.filter-details[open] summary {
-  padding-bottom: 0.15rem;
+.search-shell-icon-button.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#search-input {
+  margin: 0;
+  width: 100%;
+  min-height: 2.7rem;
+  border: none;
+  border-radius: 999px;
+  background: #f3f6fa;
+  box-shadow: none;
+  padding: 0 1rem;
+}
+
+#filter-toggle {
+  margin-bottom: 0;
+  padding: 0;
+}
+
+#search-input:focus {
+  box-shadow: none;
+}
+
+.filter-panel {
+  margin: 0.35rem 0.35rem 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid #e3e8ef;
+  border-radius: 14px;
+  background: #fbfcfe;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.1);
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  max-height: 0;
+  overflow: hidden;
+  transition: opacity 0.22s ease, transform 0.22s ease, max-height 0.22s ease, margin-top 0.22s ease,
+    padding-top 0.22s ease, padding-bottom 0.22s ease;
+}
+
+.filter-panel.is-open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  max-height: 16rem;
+}
+
+.filter-panel[aria-hidden="true"] {
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.is-hidden {
+  display: none !important;
 }
 
 
@@ -262,23 +333,23 @@ main {
   
   /* 子元素之间的间距 */
   gap: 0.45rem;
-  margin: 0.2rem 0.3rem 0.35rem;
+  margin: 0;
   flex-wrap: wrap;
 }
 
 /* 过滤行中的图标按钮 */
+.filter-row-icons {
+  flex-wrap: nowrap;
+}
+
 .filter-row-icons button {
   /* 边框样式：1px 实线，灰色 */
   border: 1px solid var(--muted-border-color);
-  
-  /* 圆角，与主题一致 */
-  border-radius: var(--border-radius);
-  
-  /* 白色背景 */
+  border-radius: 999px;
   background: white;
-  
-  /* 鼠标指针变为手型，表明可点击 */
   cursor: pointer;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* 过滤行图标按钮的悬停状态 */
@@ -306,11 +377,12 @@ main {
   
   /* 子元素在主轴上两端对齐，中间均匀分布 */
   justify-content: space-between;
-  
-  margin: 0.1rem 0.3rem 0.35rem;
+  margin-top: 0.5rem;
+  flex-wrap: nowrap;
 }
 
 /* 日期输入框样式 */
+.filter-row-dates .filter-select,
 .filter-row-dates input[type="date"] {
   /* 
    * flex: 1
