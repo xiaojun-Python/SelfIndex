@@ -1,6 +1,9 @@
 {% for result in results %}
 <div class="result-card" hx-get="/api/view/{{ result.chunk_id }}" hx-target="#content-display" hx-swap="innerHTML">
     <h4 id="search-results-title">{{ result.title }}</h4>
+    <div class="preview">
+        {{ result.summary or result.preview }}
+    </div>
     <div class="meta">
         {{ result.source }} | {{ result.timestamp or "未知时间" }} | {{ result.char_count }} 字
     </div>
@@ -9,9 +12,6 @@
         domain={{ result.recall_domain }} | memory={{ result.memory_unit_id }} | raw={{ result.raw_document_id }}
     </div>
     {% endif %}
-    <div class="preview">
-        {{ result.preview }}
-    </div>
 </div>
 {% endfor %}
 

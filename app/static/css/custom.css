@@ -107,6 +107,31 @@ main {
   
   /* 移除内边距，由子元素自行控制 */
   padding: 0;
+  transition: grid-template-columns 0.28s ease;
+}
+
+#home-shell.is-empty {
+  grid-template-columns: 1fr;
+  min-height: 100vh;
+  place-items: center;
+}
+
+#home-shell.is-empty .search-panel {
+  position: static;
+  height: auto;
+  width: min(720px, calc(100vw - 2rem));
+  justify-self: center;
+  align-self: center;
+}
+
+#home-shell.has-query {
+  grid-template-columns: 360px 1fr;
+  place-items: stretch;
+  min-height: 0;
+}
+
+#home-shell.has-query .search-panel {
+  width: auto;
 }
 
 
@@ -141,6 +166,55 @@ main {
   /* 移除顶部内边距（顶部已有 sticky 定位的元素） */
   padding-top: 0;
   gap: 0.35rem;
+  transition: width 0.28s ease, transform 0.28s ease, opacity 0.28s ease;
+}
+
+.landing-brand {
+  display: none;
+}
+
+#home-shell.is-empty .landing-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.landing-brand-mark {
+  width: min(460px, 72%);
+  text-align: center;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #243447;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #dbe3ec;
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+#home-shell.is-empty #search-form {
+  position: static;
+  width: 100%;
+}
+
+#home-shell.is-empty .search-shell {
+  margin: 0;
+  min-height: 3.8rem;
+}
+
+#home-shell.is-empty #search-input {
+  min-height: 3.2rem;
+  font-size: 1.05rem;
+}
+
+#home-shell.has-query .landing-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
 }
 
 
@@ -176,6 +250,28 @@ main {
   padding: 0;
 }
 
+.content-panel,
+#search-results {
+  transition: opacity 0.28s ease, transform 0.28s ease, max-height 0.28s ease;
+}
+
+#home-shell.is-empty .content-panel,
+#home-shell.is-empty #search-results {
+  opacity: 0;
+  transform: translateY(14px);
+  pointer-events: none;
+  max-height: 0;
+  overflow: hidden;
+}
+
+#home-shell.has-query .content-panel,
+#home-shell.has-query #search-results {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  max-height: none;
+}
+
 
 /* ============================================
    第七部分：搜索输入框样式 (Search Input)
@@ -192,8 +288,9 @@ main {
   min-height: 3.25rem;
   border: 1px solid #d7dce2;
   border-radius: 999px;
-  background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
+  background: #f3f6fa;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  transition: margin 0.28s ease, min-height 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
 }
 
 .search-shell-icon {
@@ -240,7 +337,7 @@ main {
   min-height: 2.7rem;
   border: none;
   border-radius: 999px;
-  background: #f3f6fa;
+  background: transparent;
   box-shadow: none;
   padding: 0 1rem;
 }
@@ -312,6 +409,7 @@ main {
 /* 日期选择器输入框 */
 #start-date,
 #end-date {
+  font-size: 15px;
   margin: 0;                    /* 移除默认外边距 */
   width: 100%;                  /* 宽度占满 */
   height: 80%;                  /* 高度为父元素的 80% */
@@ -342,14 +440,25 @@ main {
   flex-wrap: nowrap;
 }
 
-.filter-row-icons button {
+.filter-row-icons button,
+.filter-row-icons .filter-select {
   /* 边框样式：1px 实线，灰色 */
   border: 1px solid var(--muted-border-color);
   border-radius: 999px;
   background: white;
-  cursor: pointer;
   flex: 1 1 0;
   min-width: 0;
+  color: #374151;
+}
+
+.filter-row-icons button {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.filter-row-icons .filter-select {
+  padding-left: 0.75rem;
+  padding-right: 1.6rem;
 }
 
 /* 过滤行图标按钮的悬停状态 */
@@ -382,7 +491,6 @@ main {
 }
 
 /* 日期输入框样式 */
-.filter-row-dates .filter-select,
 .filter-row-dates input[type="date"] {
   /* 
    * flex: 1
@@ -400,7 +508,8 @@ main {
   
   /* 边框样式 */
   border: 1px solid var(--muted-border-color);
-  border-radius: var(--border-radius);
+  border-radius: 999px;
+  color: #374151;
 }
 
 
@@ -479,7 +588,8 @@ h2.secondary {
 */
 
 .meta {
-  font-size: 10px;               /* 小字号，用于次要信息 */
+  font-size: 8px;               /* 小字号，用于次要信息 */
+  margin: 0.1rem;
 }
 
 .meta-debug {
@@ -505,7 +615,8 @@ h2.secondary {
   -webkit-box-orient: vertical;
   overflow: hidden;
   
-  margin-top: 0.35rem;           /* 顶部外边距 */
+  margin-top: 0rem;           /* 顶部外边距 */
+  margin: 0.1rem;
 }
 
 
@@ -542,60 +653,65 @@ h4 {
    固定在页面右下角，方便用户快速回到顶部
 */
 
-#back-to-top {
-  /* 
-   * position: fixed
-   * - 相对于 viewport（视口）定位
-   * - 不随页面滚动移动
-   */
+.floating-actions {
   position: fixed;
-  
-  /* 距底部 2rem */
-  bottom: 2rem;
-  
-  /* 距右侧 2rem */
   right: 2rem;
-  
-  /* 按钮尺寸：50x50 像素 */
-  width: 50px;
-  height: 50px;
-  
-  /* 主色调背景，白色文字 */
-  background: var(--primary);
-  color: white;
-  
-  /* 移除默认边框 */
-  border: none;
-  
-  /* 圆形按钮 */
-  border-radius: 50%;
-  
-  /* 字体大小 */
-  font-size: 1.5rem;
-  
-  /* 鼠标指针 */
-  cursor: pointer;
-  
-  /* 
-   * opacity: 0.7
-   * 初始半透明，用户容易注意到但不会太突兀
-   */
-  opacity: 0.7;
-  
-  /* 过渡效果：所有属性变化时平滑动画 */
-  transition: all 0.3s;
-  
-  /* 
-   * z-index: 999
-   * 确保按钮位于所有内容之上
-   */
+  bottom: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
   z-index: 999;
+  opacity: 0;
+  transform: translateY(14px);
+  pointer-events: none;
+  transition: opacity 0.24s ease, transform 0.24s ease;
 }
 
-/* 返回顶部按钮悬停状态 */
-#back-to-top:hover {
-  opacity: 1;                   /* 完全不透明 */
-  transform: scale(1.1);        /* 放大 1.1 倍 */
+.floating-actions.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.floating-action {
+  width: 52px;
+  height: 52px;
+  border: none;
+  border-radius: 50%;
+  background: #1f5fae;
+  color: white;
+  font-size: 1.4rem;
+  box-shadow: 0 12px 26px rgba(31, 95, 174, 0.24);
+  cursor: pointer;
+  opacity: 0.92;
+  transition: transform 0.2s ease, opacity 0.2s ease, background 0.2s ease;
+}
+
+.floating-action:hover {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+
+#back-to-top {
+  display: none;
+}
+
+#back-to-top.is-visible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.floating-action-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #243447;
+  box-shadow: 0 12px 26px rgba(36, 52, 71, 0.24);
+}
+
+.floating-action-add:hover {
+  background: #182432;
 }
 
 

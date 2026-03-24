@@ -247,6 +247,7 @@ def search(sqlite_db: Any, vector_db: Any, query: str, filters: dict[str, Any]) 
             "raw_document_id": item["raw_document_id"],
             "recall_domain": item["recall_domain"],
             "content": item["content"],
+            "summary": item["summary"],
             "preview": item["preview"],
             "title": item["title"],
             "source": item["source"],

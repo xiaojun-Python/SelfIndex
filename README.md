@@ -1,3 +1,6 @@
+
+![Index.png](docs/Index.png)
+
 # SelfIndex
 
 SelfIndex 是一个面向长期使用的个人记忆系统原型。  

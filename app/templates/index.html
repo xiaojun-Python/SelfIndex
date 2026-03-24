@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="grid">
+<div id="home-shell" class="grid is-empty">
     <div class="search-panel">
         <form id="search-form">
+            <div class="landing-brand">
+                <div class="landing-brand-mark">SelfIndex</div>
+            </div>
             <input type="hidden" id="sort-input" name="sort" value="default">
 
             <div class="search-shell">
@@ -74,9 +77,6 @@
                     >
                         最新
                     </button>
-                </div>
-
-                <div class="filter-row filter-row-dates">
                     <select
                         class="filter-select"
                         name="min_length"
@@ -91,6 +91,9 @@
                         <option value="100">100 字以上</option>
                         <option value="200">200 字以上</option>
                     </select>
+                </div>
+
+                <div class="filter-row filter-row-dates">
                     <input
                         id="start-date"
                         type="date"
@@ -128,13 +131,22 @@
     </div>
 </div>
 
+<div id="floating-actions" class="floating-actions" aria-hidden="true">
+    <button type="button" id="back-to-top" class="floating-action" aria-label="回到顶部" title="回到顶部">
+        ↑
+    </button>
+    <button type="button" id="open-add-dialog" class="floating-action floating-action-add" aria-label="添加数据" title="添加数据">
+        ＋
+    </button>
+</div>
+
 <dialog id="data-form-modal">
     <article>
         <header>
-            <button aria-label="Close" rel="prev" hx-post="/api/close_modal" hx-target="#data-form-modal" hx-swap="none"></button>
+            <button type="button" class="dialog-close-button" aria-label="Close"></button>
             <h3 id="form-title">添加新数据</h3>
         </header>
-        <form id="data-form" hx-post="/api/save_document" hx-target="#data-form-modal" hx-swap="none">
+        <form id="data-form">
             <input type="hidden" id="form-doc-id" name="doc_id">
 
             <fieldset>
@@ -171,7 +183,7 @@
 
             <div class="grid">
                 <button type="submit" class="primary">保存</button>
-                <button type="button" class="secondary" hx-post="/api/close_modal" hx-target="#data-form-modal" hx-swap="none">取消</button>
+                <button type="button" class="secondary dialog-close-button">取消</button>
             </div>
         </form>
     </article>
@@ -185,8 +197,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const filterToggle = document.getElementById("filter-toggle");
     const filterPanel = document.getElementById("filter-panel");
     const searchForm = document.getElementById("search-form");
+    const homeShell = document.getElementById("home-shell");
+    const floatingActions = document.getElementById("floating-actions");
+    const backToTopButton = document.getElementById("back-to-top");
+    const openAddDialogButton = document.getElementById("open-add-dialog");
+    const dataFormModal = document.getElementById("data-form-modal");
+    const dialogCloseButtons = document.querySelectorAll(".dialog-close-button");
 
-    if (!searchInput || !filterToggle || !filterPanel || !searchForm) {
+    if (!searchInput || !filterToggle || !filterPanel || !searchForm || !homeShell) {
         return;
     }
 
@@ -199,9 +217,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const updateFilterAvailability = () => {
         const hasQuery = searchInput.value.trim().length > 0;
         filterToggle.classList.toggle("is-hidden", !hasQuery);
+        homeShell.classList.toggle("is-empty", !hasQuery);
+        homeShell.classList.toggle("has-query", hasQuery);
         if (!hasQuery) {
             closePanel();
         }
+    };
+
+    const updateFloatingActions = () => {
+        if (!floatingActions || !backToTopButton) {
+            return;
+        }
+        const hasQuery = homeShell.classList.contains("has-query");
+        const longPage = document.documentElement.scrollHeight > window.innerHeight + 120;
+        const hasScrolled = window.scrollY > 180;
+
+        floatingActions.classList.toggle("is-visible", hasQuery);
+        floatingActions.setAttribute("aria-hidden", hasQuery ? "false" : "true");
+        backToTopButton.classList.toggle("is-visible", hasQuery && longPage && hasScrolled);
     };
 
     filterToggle.addEventListener("click", () => {
@@ -215,6 +248,27 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     searchInput.addEventListener("input", updateFilterAvailability);
+    searchInput.addEventListener("input", updateFloatingActions);
+
+    if (backToTopButton) {
+        backToTopButton.addEventListener("click", () => {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+    }
+
+    if (openAddDialogButton && dataFormModal) {
+        openAddDialogButton.addEventListener("click", () => {
+            dataFormModal.showModal();
+        });
+    }
+
+    dialogCloseButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            if (dataFormModal) {
+                dataFormModal.close();
+            }
+        });
+    });
 
     document.addEventListener("click", (event) => {
         if (!searchForm.contains(event.target)) {
@@ -222,7 +276,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
+    window.addEventListener("scroll", updateFloatingActions);
+    window.addEventListener("resize", updateFloatingActions);
+
     updateFilterAvailability();
+    updateFloatingActions();
 });
 </script>
 {% endblock %}
