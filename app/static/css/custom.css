@@ -140,6 +140,7 @@ main {
   
   /* 移除顶部内边距（顶部已有 sticky 定位的元素） */
   padding-top: 0;
+  gap: 0.35rem;
 }
 
 
@@ -149,10 +150,8 @@ main {
    搜索面板内部的多个 sticky 元素，确保搜索控件始终可见
 */
 
-.menu-bar,
-.search-input,
-.filters,
-.search-header {
+#search-form,
+#search-results {
   /* 
    * flex: 0 0 auto
    * - flex-grow: 0 不参与剩余空间分配
@@ -172,28 +171,7 @@ main {
   z-index: 5;
   
   /* 内边距：上下 0.5rem，左右 0 */
-  padding: 0.5rem 0;
-}
-
-
-/* ============================================
-   第六部分：菜单栏样式 (Menu Bar)
-   ============================================
-   顶部导航菜单，采用均匀分布的布局
-*/
-
-.menu-bar {
-  /* 弹性盒布局 */
-  display: flex;
-  
-  /* 
-   * justify-content: space-evenly
-   * - 所有子元素均匀分布，首尾元素距边缘距离等于元素间距的一半
-   */
-  justify-content: space-evenly;
-  
-  /* 外边距：上下 0.2rem，左右 0 */
-  margin: 0.2rem;
+  padding: 0;
 }
 
 
@@ -203,8 +181,9 @@ main {
 */
 
 #search-input {
-  margin: 0.3rem;               /* 外边距 */
-  width: 97%;                   /* 宽度占满父元素，保留 3% 边距 */
+  margin: 0.2rem 0.35rem 0;
+  width: calc(100% - 0.7rem);
+  min-height: 2.7rem;
 }
 
 
@@ -214,10 +193,29 @@ main {
    HTML <details> 元素用于创建可折叠的过滤区域
 */
 
-details {
-  margin: 0.3rem;               /* 外边距 */
-  padding: 3px;                 /* 内边距 */
-  border-bottom: 0;             /* 移除底部边框 */
+.filter-details {
+  margin: 0 0.35rem;
+  border: 1px solid #e6e8eb;
+  border-radius: 10px;
+  background: #fafbfc;
+  padding: 0.1rem 0.15rem;
+}
+
+.filter-details summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #4b5563;
+  padding: 0.35rem 0.45rem;
+}
+
+.filter-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.filter-details[open] summary {
+  padding-bottom: 0.15rem;
 }
 
 
@@ -229,13 +227,15 @@ details {
 .filter-button,
 .filter-select {
   margin: 0;                    /* 移除默认外边距 */
-  padding: 0.3rem;              /* 内边距 */
+  padding: 0.25rem 0.45rem;
+  min-height: 2rem;
+  font-size: 0.82rem;
 }
 
 .filter-select {
-  width: 100%;                  /* 宽度占满父元素 */
-  height: 100%;                 /* 高度占满父元素 */
-  padding: 0.3rem;              /* 内边距 */
+  width: 100%;
+  height: 100%;
+  padding: 0.25rem 0.35rem;
 }
 
 /* 日期选择器输入框 */
@@ -261,9 +261,9 @@ details {
   align-items: center;
   
   /* 子元素之间的间距 */
-  gap: 0.5rem;
-  
-  margin: 0.3rem;               /* 外边距 */
+  gap: 0.45rem;
+  margin: 0.2rem 0.3rem 0.35rem;
+  flex-wrap: wrap;
 }
 
 /* 过滤行中的图标按钮 */
@@ -302,12 +302,12 @@ details {
   width: 100%;
   
   /* 最大宽度限制，防止在小屏幕上过度拉伸 */
-  max-width: 350px;
+  max-width: 100%;
   
   /* 子元素在主轴上两端对齐，中间均匀分布 */
   justify-content: space-between;
   
-  margin: 0.3rem;               /* 外边距 */
+  margin: 0.1rem 0.3rem 0.35rem;
 }
 
 /* 日期输入框样式 */
@@ -321,10 +321,10 @@ details {
   flex: 1;
   
   /* 最大宽度 160px */
-  max-width: 160px;
+  max-width: none;
   
   /* 最小宽度 150px，防止过窄 */
-  min-width: 150px;
+  min-width: 120px;
   
   /* 边框样式 */
   border: 1px solid var(--muted-border-color);
@@ -349,7 +349,7 @@ details {
 */
 
 #search-results {
-  margin: 0.3rem;                /* 外边距 */
+  margin: 0.1rem 0.3rem 0.3rem;
   
   /* 
    * flex: 1 1 auto

@@ -3,11 +3,6 @@
 {% block content %}
 <div class="grid">
     <div class="search-panel">
-        <div class="menu-bar">
-            <h2 class="secondary">搜索</h2>
-            <h2 class="secondary" hx-get="/api/add_form" hx-target="#data-form-modal" hx-swap="innerHTML">添加</h2>
-        </div>
-
         <form id="search-form">
             <input type="hidden" id="sort-input" name="sort" value="default">
 
@@ -22,83 +17,87 @@
                 hx-include="#search-form"
             >
 
-            <div class="filter-row filter-row-icons">
-                <button
-                    type="button"
-                    class="filter-button"
-                    onclick="document.getElementById('sort-input').value='default'"
-                    hx-get="/api/update_filters"
-                    hx-target="#search-results"
-                    hx-swap="innerHTML"
-                    hx-include="#search-form"
-                    title="按相关度排序"
-                >
-                    相关
-                </button>
-                <button
-                    type="button"
-                    class="filter-button"
-                    onclick="document.getElementById('sort-input').value='time_asc'"
-                    hx-get="/api/update_filters"
-                    hx-target="#search-results"
-                    hx-swap="innerHTML"
-                    hx-include="#search-form"
-                    title="按时间正序"
-                >
-                    最早
-                </button>
-                <button
-                    type="button"
-                    class="filter-button"
-                    onclick="document.getElementById('sort-input').value='time_desc'"
-                    hx-get="/api/update_filters"
-                    hx-target="#search-results"
-                    hx-swap="innerHTML"
-                    hx-include="#search-form"
-                    title="按时间倒序"
-                >
-                    最新
-                </button>
+            <details class="filter-details">
+                <summary>筛选</summary>
 
-                <select
-                    class="filter-select"
-                    name="min_length"
-                    hx-get="/api/update_filters"
-                    hx-trigger="change"
-                    hx-target="#search-results"
-                    hx-swap="innerHTML"
-                    hx-include="#search-form"
-                >
-                    <option value="0">不限长度</option>
-                    <option value="50">50 字以上</option>
-                    <option value="100">100 字以上</option>
-                    <option value="200">200 字以上</option>
-                </select>
-            </div>
+                <div class="filter-row filter-row-icons">
+                    <button
+                        type="button"
+                        class="filter-button"
+                        onclick="document.getElementById('sort-input').value='default'"
+                        hx-get="/api/update_filters"
+                        hx-target="#search-results"
+                        hx-swap="innerHTML"
+                        hx-include="#search-form"
+                        title="按相关度排序"
+                    >
+                        相关
+                    </button>
+                    <button
+                        type="button"
+                        class="filter-button"
+                        onclick="document.getElementById('sort-input').value='time_asc'"
+                        hx-get="/api/update_filters"
+                        hx-target="#search-results"
+                        hx-swap="innerHTML"
+                        hx-include="#search-form"
+                        title="按时间正序"
+                    >
+                        最早
+                    </button>
+                    <button
+                        type="button"
+                        class="filter-button"
+                        onclick="document.getElementById('sort-input').value='time_desc'"
+                        hx-get="/api/update_filters"
+                        hx-target="#search-results"
+                        hx-swap="innerHTML"
+                        hx-include="#search-form"
+                        title="按时间倒序"
+                    >
+                        最新
+                    </button>
 
-            <div class="filter-row filter-row-dates">
-                <input
-                    id="start-date"
-                    type="date"
-                    name="start_date"
-                    hx-get="/api/update_filters"
-                    hx-trigger="change"
-                    hx-target="#search-results"
-                    hx-swap="innerHTML"
-                    hx-include="#search-form"
-                >
-                <span>-</span>
-                <input
-                    id="end-date"
-                    type="date"
-                    name="end_date"
-                    hx-get="/api/update_filters"
-                    hx-trigger="change"
-                    hx-target="#search-results"
-                    hx-swap="innerHTML"
-                    hx-include="#search-form"
-                >
-            </div>
+                    <select
+                        class="filter-select"
+                        name="min_length"
+                        hx-get="/api/update_filters"
+                        hx-trigger="change"
+                        hx-target="#search-results"
+                        hx-swap="innerHTML"
+                        hx-include="#search-form"
+                    >
+                        <option value="0">不限长度</option>
+                        <option value="50">50 字以上</option>
+                        <option value="100">100 字以上</option>
+                        <option value="200">200 字以上</option>
+                    </select>
+                </div>
+
+                <div class="filter-row filter-row-dates">
+                    <input
+                        id="start-date"
+                        type="date"
+                        name="start_date"
+                        hx-get="/api/update_filters"
+                        hx-trigger="change"
+                        hx-target="#search-results"
+                        hx-swap="innerHTML"
+                        hx-include="#search-form"
+                    >
+                    <span>-</span>
+                    <input
+                        id="end-date"
+                        type="date"
+                        name="end_date"
+                        hx-get="/api/update_filters"
+                        hx-trigger="change"
+                        hx-target="#search-results"
+                        hx-swap="innerHTML"
+                        hx-include="#search-form"
+                    >
+                </div>
+            </details>
         </form>
 
         <div id="search-results" class="results-container"></div>
