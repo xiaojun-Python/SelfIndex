@@ -28,6 +28,7 @@
   /* -------- 颜色变量 -------- */
   --primary: #0066cc;           /* 主色调 - 蓝色，用于按钮、链接、强调元素 */
   --muted-color: #e0e0e0;       /* 暗淡色调 - 浅灰色，用于徽章、禁用状态 */
+  --muted-border-color: #e0e0e0;
 
   /* -------- 间距变量 -------- */
   /* 使用 rem 单位，便于根据根元素字体大小进行缩放 */
@@ -614,8 +615,7 @@ h2.secondary {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  
-  margin-top: 0rem;           /* 顶部外边距 */
+
   margin: 0.1rem;
 }
 

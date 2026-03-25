@@ -10,12 +10,14 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import chromadb
 
 from engine.init_db import init_database
+from engine.sqlite_backend import connect_database
 
 
 class VectorManager:
@@ -83,21 +85,34 @@ class DatabaseManager:
         """每次启动都补齐缺失表，兼容旧数据库的渐进式迁移。"""
         init_database(self.db_path)
 
-    def get_connection(self) -> sqlite3.Connection:
+    def get_connection(self):
         """返回一个开启了行名访问和外键约束的连接。"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        return connect_database(self.db_path)
+
+    @contextmanager
+    def transaction(self):
+        conn = self.get_connection()
+        try:
+            conn.execute("BEGIN")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def count_rows(self, table_name: str) -> int:
         with self.get_connection() as conn:
             row = conn.execute(f"SELECT COUNT(*) AS count FROM {table_name}").fetchone()
         return int(row["count"]) if row else 0
 
-    def upsert_raw_document(self, raw_document: dict[str, Any]) -> None:
+    def upsert_raw_document(self, raw_document: dict[str, Any], *, conn=None) -> None:
         """插入或更新一条原始文档记录。"""
-        with self.get_connection() as conn:
+        owns_connection = conn is None
+        if owns_connection:
+            conn = self.get_connection()
+        try:
             conn.execute(
                 """
                 INSERT INTO raw_documents (
@@ -143,14 +158,28 @@ class DatabaseManager:
                     raw_document.get("metadata_json"),
                 ),
             )
+            if owns_connection:
+                conn.commit()
+        except Exception:
+            if owns_connection:
+                conn.rollback()
+            raise
+        finally:
+            if owns_connection:
+                conn.close()
 
     def replace_memory_units(
         self,
         raw_document_id: str,
         memory_units: list[dict[str, Any]],
+        *,
+        conn=None,
     ) -> list[str]:
         """替换某个原始文档下的全部记忆单元，并返回旧 ID。"""
-        with self.get_connection() as conn:
+        owns_connection = conn is None
+        if owns_connection:
+            conn = self.get_connection()
+        try:
             old_ids = [
                 row["memory_unit_id"]
                 for row in conn.execute(
@@ -194,12 +223,24 @@ class DatabaseManager:
                     for unit in memory_units
                 ],
             )
+            if owns_connection:
+                conn.commit()
             return old_ids
+        except Exception:
+            if owns_connection:
+                conn.rollback()
+            raise
+        finally:
+            if owns_connection:
+                conn.close()
 
-    def mark_memory_units_as_embedded(self, memory_unit_ids: list[str]) -> None:
+    def mark_memory_units_as_embedded(self, memory_unit_ids: list[str], *, conn=None) -> None:
         if not memory_unit_ids:
             return
-        with self.get_connection() as conn:
+        owns_connection = conn is None
+        if owns_connection:
+            conn = self.get_connection()
+        try:
             conn.executemany(
                 """
                 UPDATE memory_units
@@ -208,6 +249,154 @@ class DatabaseManager:
                 """,
                 [(memory_unit_id,) for memory_unit_id in memory_unit_ids],
             )
+            if owns_connection:
+                conn.commit()
+        except Exception:
+            if owns_connection:
+                conn.rollback()
+            raise
+        finally:
+            if owns_connection:
+                conn.close()
+
+    def create_import_job(
+        self,
+        *,
+        source: str,
+        file_name: str,
+        file_path: str,
+        file_hash: str,
+        import_config_json: str | None = None,
+        notes: str | None = None,
+    ) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO import_jobs (
+                    source,
+                    file_name,
+                    file_path,
+                    file_hash,
+                    import_config_json,
+                    notes,
+                    status
+                ) VALUES (?, ?, ?, ?, ?, ?, 'running')
+                """,
+                (source, file_name, file_path, file_hash, import_config_json, notes),
+            )
+            return int(cursor.lastrowid)
+
+    def finish_import_job(
+        self,
+        import_id: int,
+        *,
+        status: str,
+        raw_documents_count: int,
+        memory_units_count: int,
+        skipped_count: int = 0,
+        error_message: str | None = None,
+        notes: str | None = None,
+    ) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE import_jobs
+                SET finished_at = CURRENT_TIMESTAMP,
+                    status = ?,
+                    raw_documents_count = ?,
+                    memory_units_count = ?,
+                    skipped_count = ?,
+                    error_message = ?,
+                    notes = COALESCE(?, notes)
+                WHERE import_id = ?
+                """,
+                (
+                    status,
+                    raw_documents_count,
+                    memory_units_count,
+                    skipped_count,
+                    error_message,
+                    notes,
+                    import_id,
+                ),
+            )
+
+    def get_import_job(self, import_id: int) -> sqlite3.Row | None:
+        with self.get_connection() as conn:
+            return conn.execute(
+                """
+                SELECT import_id, source, file_name, file_path, file_hash,
+                       started_at, finished_at, raw_documents_count, memory_units_count,
+                       skipped_count, status, error_message, import_config_json, notes
+                FROM import_jobs
+                WHERE import_id = ?
+                """,
+                (import_id,),
+            ).fetchone()
+
+    def get_memory_unit_details(self, memory_unit_ids: list[str]) -> dict[str, sqlite3.Row]:
+        if not memory_unit_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in memory_unit_ids)
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    mu.memory_unit_id,
+                    mu.raw_document_id,
+                    mu.unit_index,
+                    mu.unit_type,
+                    mu.recall_domain,
+                    mu.content AS memory_content,
+                    mu.summary,
+                    mu.start_char,
+                    mu.end_char,
+                    mu.embedding_version,
+                    mu.metadata_json AS memory_metadata_json,
+                    rd.source,
+                    rd.source_type,
+                    rd.external_id,
+                    rd.root_document_id,
+                    rd.title,
+                    rd.author,
+                    rd.created_at,
+                    rd.imported_at,
+                    rd.content AS raw_content,
+                    rd.content_hash,
+                    rd.raw_payload,
+                    rd.metadata_json AS raw_metadata_json
+                FROM memory_units mu
+                JOIN raw_documents rd ON rd.raw_document_id = mu.raw_document_id
+                WHERE mu.memory_unit_id IN ({placeholders})
+                """,
+                memory_unit_ids,
+            ).fetchall()
+        return {row["memory_unit_id"]: row for row in rows}
+
+    def get_memory_units_needing_embeddings(self, limit: int = 100) -> list[sqlite3.Row]:
+        with self.get_connection() as conn:
+            return conn.execute(
+                """
+                SELECT
+                    mu.memory_unit_id,
+                    mu.raw_document_id,
+                    mu.content,
+                    mu.summary,
+                    mu.recall_domain,
+                    rd.title,
+                    rd.source,
+                    rd.source_type,
+                    rd.author,
+                    rd.created_at
+                FROM memory_units mu
+                JOIN raw_documents rd ON rd.raw_document_id = mu.raw_document_id
+                WHERE mu.is_embedded = 0
+                ORDER BY rd.created_at, mu.memory_unit_id
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
 
     def get_raw_document(self, raw_document_id: str) -> sqlite3.Row | None:
         with self.get_connection() as conn:
