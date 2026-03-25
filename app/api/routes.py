@@ -13,7 +13,8 @@ import json
 from flask import Blueprint, current_app, jsonify, render_template, request
 from markdown import markdown
 
-from engine.chunker import smart_chunking
+from app.core.settings import settings
+from engine.memory import build_memory_units, get_content_hash
 from engine.retriever import (
     get_memory_unit_payload,
     normalize_timestamp,
@@ -47,42 +48,27 @@ def _render_search_results():
     )
 
 
-def _build_chunks_for_message(content: str) -> list[dict]:
-    """旧 UI 编辑消息后，重新生成对应的 chunks。"""
-    chunks = smart_chunking(content, "", "")
-    if not chunks and content.strip():
-        stripped = content.strip()
-        chunks = [{"content": stripped, "start": 0, "end": len(stripped)}]
-
-    return [
-        {
-            "chunk_index": index,
-            "start_char": chunk["start"],
-            "end_char": chunk["end"],
-            "content": chunk["content"],
-            "hash": _hash_text(chunk["content"]),
-            "embedding_version": EMBEDDING_VERSION,
-        }
-        for index, chunk in enumerate(chunks)
-    ]
-
-
-def _vector_payload(chunk_rows: list[dict], message_row: dict, conversation_row: dict):
-    """为旧 UI 编辑保存后的 chunk 重新准备向量数据。"""
+def _vector_payload(memory_units: list[dict], raw_document: dict):
+    """为新模型下重建后的 memory units 准备向量数据。"""
     from engine.embedder import embedding_manager
 
-    texts = [chunk["content"] for chunk in chunk_rows]
+    texts = [unit["content"] for unit in memory_units]
     embeddings = embedding_manager.embed_documents(texts) if texts else []
     metadatas = [
         {
-            "message_id": message_row["message_id"],
-            "title": conversation_row["title"] or "Untitled conversation",
-            "source": conversation_row["source"] or "Unknown source",
-            "timestamp": message_row["timestamp"] or "",
+            "memory_unit_id": unit["memory_unit_id"],
+            "raw_document_id": unit["raw_document_id"],
+            "title": raw_document.get("title") or "Untitled document",
+            "source": raw_document["source"],
+            "source_type": raw_document["source_type"],
+            "author": raw_document.get("author") or "",
+            "created_at": raw_document.get("created_at") or "",
+            "summary": unit.get("summary") or "",
+            "recall_domain": unit.get("recall_domain") or "default",
         }
-        for _ in chunk_rows
+        for unit in memory_units
     ]
-    vector_ids = [str(chunk["chunk_id"]) for chunk in chunk_rows]
+    vector_ids = [unit["memory_unit_id"] for unit in memory_units]
     return vector_ids, embeddings, metadatas, texts
 
 
@@ -100,31 +86,33 @@ def _restore_vectors(vector_db, old_vector_state):
     )
 
 
-def _render_document_by_chunk(chunk_id, notice=None):
-    """兼容旧 UI：按 chunk 查看完整消息。"""
+def _render_memory_document(memory_unit_id, notice=None):
+    """按 memory unit 查看完整原始文档。"""
     sqlite_db = current_app.config["SQLITE_DB"]
-    detail = sqlite_db.get_message_detail_by_chunk(chunk_id)
-    if not detail:
+    payload = get_memory_unit_payload(sqlite_db, memory_unit_id)
+    if payload is None:
         return render_template("document_detail.html", doc=None)
 
-    try:
-        extra_meta = json.loads(detail["raw_meta"]) if detail["raw_meta"] else {}
-    except json.JSONDecodeError:
-        extra_meta = {}
-
-    merged_meta = {**extra_meta, "source": detail["source"], "model": detail["model"]}
-    content_html = markdown(detail["content"], extensions=["extra", "codehilite"])
+    raw_document = payload["raw_document"]
+    metadata = raw_document.get("metadata") or {}
+    memory_unit = payload["memory_unit"]
+    content_html = markdown(raw_document["content"], extensions=["extra", "codehilite"])
 
     return render_template(
         "document_detail.html",
         doc={
-            "doc_id": chunk_id,
-            "message_id": detail["message_id"],
-            "title": detail["title"],
-            "sender": detail["sender_type"],
-            "timestamp": normalize_timestamp(detail["timestamp"]),
+            "doc_id": memory_unit["memory_unit_id"],
+            "raw_document_id": raw_document["raw_document_id"],
+            "title": raw_document["title"] or "Untitled document",
+            "sender": raw_document["author"] or "unknown",
+            "timestamp": raw_document["created_at"],
             "content_html": content_html,
-            "metadata": merged_meta,
+            "metadata": {
+                **metadata,
+                "source": raw_document["source"],
+                "source_type": raw_document["source_type"],
+                "recall_domain": memory_unit["recall_domain"],
+            },
             "notice": notice,
         },
     )
@@ -172,63 +160,53 @@ def memory_unit_detail(memory_unit_id):
 
 @bp.route("/api/view/<chunk_id>")
 def view_document(chunk_id):
-    return _render_document_by_chunk(chunk_id)
+    return _render_memory_document(chunk_id)
 
 
 @bp.route("/api/edit/<chunk_id>")
 def edit_document(chunk_id):
-    """兼容旧 UI 的编辑表单。"""
+    """基于新模型的原始文档编辑表单。"""
     sqlite_db = current_app.config["SQLITE_DB"]
-    detail = sqlite_db.get_message_detail_by_chunk(chunk_id)
-    if not detail:
+    payload = get_memory_unit_payload(sqlite_db, chunk_id)
+    if payload is None:
         return render_template("document_form.html", data=None)
 
-    try:
-        extra_meta = json.loads(detail["raw_meta"]) if detail["raw_meta"] else {}
-    except json.JSONDecodeError:
-        extra_meta = {}
+    raw_document = payload["raw_document"]
 
     return render_template(
         "document_form.html",
         data={
             "doc_id": chunk_id,
-            "message_id": detail["message_id"],
-            "conversation_id": detail["conversation_id"],
-            "title": detail["title"] or "",
-            "sender": detail["sender_type"] or "",
-            "content": detail["content"] or "",
-            "tags": extra_meta.get("tags", []),
+            "title": raw_document["title"] or "",
+            "sender": raw_document["author"] or "",
+            "content": raw_document["content"] or "",
+            "tags": (raw_document.get("metadata") or {}).get("tags", []),
         },
     )
 
 
 @bp.route("/api/document/<chunk_id>", methods=["PUT"])
 def update_document(chunk_id):
-    """兼容旧 UI 的消息编辑保存。
-
-    这部分仍然基于旧的 messages/chunks 表工作，后续如果全面切到新模型，
-    可以再把它统一收敛。
-    """
+    """基于新模型保存原始文档，并重建 memory units / vectors。"""
     sqlite_db = current_app.config["SQLITE_DB"]
     vector_db = current_app.config["VECTOR_DB"]
 
-    detail = sqlite_db.get_message_detail_by_chunk(chunk_id)
-    if not detail:
+    payload = get_memory_unit_payload(sqlite_db, chunk_id)
+    if payload is None:
         return render_template(
             "document_detail.html",
             doc={"notice": "Record not found. It may have been deleted."},
         ), 404
+    raw_document = payload["raw_document"]
 
-    title = (request.form.get("title") or detail["title"] or "").strip() or "Untitled conversation"
-    sender = (request.form.get("sender") or detail["sender_type"] or "").strip() or "unknown"
+    title = (request.form.get("title") or raw_document["title"] or "").strip() or "Untitled document"
+    sender = (request.form.get("sender") or raw_document["author"] or "").strip() or "unknown"
     content = (request.form.get("content") or "").strip()
     if not content:
         return render_template(
             "document_form.html",
             data={
                 "doc_id": chunk_id,
-                "message_id": detail["message_id"],
-                "conversation_id": detail["conversation_id"],
                 "title": title,
                 "sender": sender,
                 "content": content,
@@ -237,54 +215,39 @@ def update_document(chunk_id):
             },
         ), 400
 
-    old_chunks = [dict(row) for row in sqlite_db.get_chunks_by_message_id(detail["message_id"])]
-    old_chunk_ids = [str(chunk["chunk_id"]) for chunk in old_chunks]
-    old_vector_state = vector_db.get_vectors(old_chunk_ids)
-
-    snapshot = {
-        "conversation": {
-            "conversation_id": detail["conversation_id"],
-            "title": detail["title"],
-        },
-        "message": {
-            "message_id": detail["message_id"],
-            "sender_type": detail["sender_type"],
-            "content": detail["content"],
-            "content_length": detail["content_length"],
-            "content_hash": detail["content_hash"],
-        },
-        "chunks": old_chunks,
-    }
-
-    new_chunks = _build_chunks_for_message(content)
-    new_content_hash = _hash_text(content)
+    existing_units = sqlite_db.get_memory_units_by_raw_document_id(raw_document["raw_document_id"])
+    old_memory_unit_ids = [row["memory_unit_id"] for row in existing_units]
 
     try:
-        inserted_chunks = sqlite_db.replace_message_and_chunks(
-            message_id=detail["message_id"],
-            conversation_id=detail["conversation_id"],
-            title=title,
-            sender=sender,
-            content=content,
-            content_hash=new_content_hash,
-            chunk_rows=new_chunks,
-        )
-
-        updated_message = {
-            "message_id": detail["message_id"],
-            "timestamp": detail["timestamp"],
-        }
-        updated_conversation = {
+        updated_raw_document = {
+            "raw_document_id": raw_document["raw_document_id"],
+            "source": raw_document["source"],
+            "source_type": raw_document["source_type"],
+            "external_id": raw_document["external_id"],
+            "root_document_id": raw_document["root_document_id"],
             "title": title,
-            "source": detail["source"],
+            "author": sender,
+            "created_at": raw_document["created_at"],
+            "content": content,
+            "content_hash": get_content_hash(content),
+            "raw_payload": json.dumps(raw_document.get("raw_payload") or {}, ensure_ascii=False),
+            "metadata_json": json.dumps(raw_document.get("metadata") or {}, ensure_ascii=False),
         }
-        new_vector_ids, embeddings, metadatas, documents = _vector_payload(
-            inserted_chunks,
-            updated_message,
-            updated_conversation,
+        new_memory_units = build_memory_units(
+            updated_raw_document,
+            embedding_version=settings.embedding_model,
+            protected_terms=settings.protected_terms,
         )
-
-        vector_db.delete_vectors(old_chunk_ids)
+        sqlite_db.upsert_raw_document(updated_raw_document)
+        old_memory_unit_ids = sqlite_db.replace_memory_units(
+            updated_raw_document["raw_document_id"],
+            new_memory_units,
+        )
+        vector_db.delete_vectors(old_memory_unit_ids)
+        new_vector_ids, embeddings, metadatas, documents = _vector_payload(
+            new_memory_units,
+            updated_raw_document,
+        )
         if new_vector_ids:
             vector_db.add_vectors(
                 ids=new_vector_ids,
@@ -292,52 +255,30 @@ def update_document(chunk_id):
                 metadatas=metadatas,
                 documents=documents,
             )
-            sqlite_db.mark_chunks_as_processed([chunk["chunk_id"] for chunk in inserted_chunks])
+            sqlite_db.mark_memory_units_as_embedded(new_vector_ids)
     except Exception as exc:
-        try:
-            sqlite_db.restore_message_snapshot(snapshot)
-            if "inserted_chunks" in locals():
-                vector_db.delete_vectors([str(chunk["chunk_id"]) for chunk in inserted_chunks])
-            _restore_vectors(vector_db, old_vector_state)
-        except Exception:
-            return render_template(
-                "document_form.html",
-                data={
-                    "doc_id": chunk_id,
-                    "message_id": detail["message_id"],
-                    "conversation_id": detail["conversation_id"],
-                    "title": title,
-                    "sender": sender,
-                    "content": content,
-                    "tags": [],
-                    "error": "Save failed and automatic rollback also failed.",
-                },
-            ), 500
-
         return render_template(
             "document_form.html",
             data={
                 "doc_id": chunk_id,
-                "message_id": detail["message_id"],
-                "conversation_id": detail["conversation_id"],
                 "title": title,
                 "sender": sender,
                 "content": content,
                 "tags": [],
-                "error": f"Save failed and changes were rolled back: {exc}",
+                "error": f"Save failed: {exc}",
             },
         ), 500
 
-    new_first_chunk_id = inserted_chunks[0]["chunk_id"] if inserted_chunks else chunk_id
-    return _render_document_by_chunk(
-        new_first_chunk_id,
+    new_first_memory_unit_id = new_memory_units[0]["memory_unit_id"] if new_memory_units else chunk_id
+    return _render_memory_document(
+        new_first_memory_unit_id,
         notice="Saved. SQLite and Chroma are now in sync.",
     )
 
 
 @bp.route("/api/metadata/fields")
 def get_metadata_fields():
-    return jsonify({"fields": ["title", "source", "sender_type", "model"]})
+    return jsonify({"fields": ["title", "source", "source_type", "author", "recall_domain"]})
 
 
 @bp.route("/api/metadata/values/<field>")

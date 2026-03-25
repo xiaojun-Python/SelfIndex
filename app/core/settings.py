@@ -47,6 +47,7 @@ class Settings:
     debug: bool = _as_bool(os.getenv("DEBUG"), True)
     host: str = os.getenv("HOST", "127.0.0.1")
     port: int = int(os.getenv("PORT", "5000"))
+    sqlite_cipher_key: str = os.getenv("SQLITE_CIPHER_KEY", "")
 
     # Unlock-style query syntax.
     protected_terms: list[str] = field(default_factory=lambda: _as_csv_list(os.getenv("PROTECTED_TERMS")))

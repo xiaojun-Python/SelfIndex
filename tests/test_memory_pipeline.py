@@ -13,7 +13,8 @@ from pathlib import Path
 
 from engine.database import DatabaseManager
 from engine.retriever import get_memory_unit_payload, search_memory
-from scripts.import_legacy_data import import_export_file
+from scripts.build_embeddings import build_missing_embeddings
+from scripts.import_exports import import_export_file
 
 
 class FakeEmbedder:
@@ -191,8 +192,74 @@ class MemoryPipelineTests(unittest.TestCase):
             embedder=self.embedder,
         )
 
-        self.assertEqual(first, second)
+        self.assertEqual(first["raw_documents"], second["raw_documents"])
+        self.assertEqual(first["memory_units"], second["memory_units"])
+        self.assertNotEqual(first["import_id"], second["import_id"])
         self.assertEqual(len(self.vector_db.records), second["memory_units"])
+
+    def test_import_creates_import_job_record(self) -> None:
+        result = import_export_file(
+            self.export_path,
+            sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db,
+            embedder=self.embedder,
+        )
+
+        import_job = self.sqlite_db.get_import_job(result["import_id"])
+        self.assertIsNotNone(import_job)
+        self.assertEqual(import_job["status"], "success")
+        self.assertEqual(import_job["raw_documents_count"], result["raw_documents"])
+        self.assertEqual(import_job["memory_units_count"], result["memory_units"])
+
+    def test_import_can_skip_embedding_and_vector_write(self) -> None:
+        result = import_export_file(
+            self.export_path,
+            sqlite_db=self.sqlite_db,
+            vector_db=None,
+            skip_embedding=True,
+        )
+
+        self.assertEqual(result["raw_documents"], 2)
+        self.assertEqual(self.vector_db.records, {})
+        memory_units = self.sqlite_db.get_memory_units_by_raw_document_id(
+            "chatgpt:conversation_message:msg-1"
+        )
+        self.assertTrue(memory_units)
+        self.assertEqual(memory_units[0]["is_embedded"], 0)
+
+        import_job = self.sqlite_db.get_import_job(result["import_id"])
+        self.assertEqual(import_job["status"], "success")
+        self.assertIn('"embedding_enabled": false', import_job["import_config_json"])
+
+    def test_build_embeddings_processes_only_pending_units(self) -> None:
+        import_export_file(
+            self.export_path,
+            sqlite_db=self.sqlite_db,
+            vector_db=None,
+            skip_embedding=True,
+        )
+
+        first_run = build_missing_embeddings(
+            sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db,
+            embedder=self.embedder,
+            batch_size=1,
+        )
+        second_run = build_missing_embeddings(
+            sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db,
+            embedder=self.embedder,
+            batch_size=1,
+        )
+
+        self.assertGreater(first_run["processed"], 0)
+        self.assertEqual(second_run["processed"], 0)
+        self.assertEqual(second_run["has_remaining"], 0)
+
+        memory_units = self.sqlite_db.get_memory_units_by_raw_document_id(
+            "chatgpt:conversation_message:msg-1"
+        )
+        self.assertTrue(all(unit["is_embedded"] == 1 for unit in memory_units))
 
 
 if __name__ == "__main__":

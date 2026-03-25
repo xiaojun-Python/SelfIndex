@@ -146,10 +146,11 @@ def search_memory(
     if not ids or not ids[0]:
         return []
 
+    details_by_id = sqlite_db.get_memory_unit_details(ids[0])
     results: list[dict[str, Any]] = []
     for index, memory_unit_id in enumerate(ids[0]):
         metadata = (metadatas[0][index] if metadatas and metadatas[0] else {}) or {}
-        detail = sqlite_db.get_memory_unit_detail(memory_unit_id)
+        detail = details_by_id.get(memory_unit_id)
         if detail is None:
             continue
         detail_domain = detail["recall_domain"] if "recall_domain" in detail.keys() else "default"

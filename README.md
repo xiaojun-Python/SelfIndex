@@ -12,10 +12,10 @@ SelfIndex 是一个面向长期使用的个人记忆系统原型。
 
 - 定义了 Archive Layer：`raw_documents`
 - 定义了 Memory Layer：`memory_units`
-- 保留了旧版 `conversations/messages/chunks` 作为过渡兼容层
+- 定义了导入任务层：`import_jobs`
 - 支持导入至少一种数据源：ChatGPT / OpenAI 导出
 - 支持把记忆单元写入 Chroma 向量库
-- 支持最小 JSON 检索接口和旧 Web 搜索页面
+- 支持最小 JSON 检索接口和当前 Web 搜索页面
 - 支持从检索结果回溯到原始文档
 - 提供了基础自动化测试
 
@@ -31,7 +31,7 @@ SelfIndex/
 ├── data/                # 本地运行数据
 │   ├── chroma_db/       # 向量索引
 │   ├── raw_exports/     # 导出文件
-│   └── selfindex.db     # SQLite 数据库
+│   └── selfindex-encrypted.db  # SQLite / SQLCipher 数据库
 ├── docs/                # 项目说明文档
 ├── engine/              # 数据模型、检索与记忆链路
 ├── scripts/             # 导入与格式解析
@@ -56,7 +56,20 @@ python -m app.main
 导入导出文件：
 
 ```bash
-python -m scripts.import_legacy_data --file data/raw_exports/your_export.json
+python -m scripts.import_exports --file data/raw_exports/your_export.json
+```
+
+如果你想先只保住数据、暂时跳过 embedding 和 Chroma 写入：
+
+```bash
+python -m scripts.import_exports --file data/raw_exports/your_export.json --skip-embedding
+```
+
+Embedding Workflow
+
+```bash
+python -m scripts.build_embeddings --batch-size 16 --max-units 200
+python -m scripts.build_embeddings
 ```
 
 运行测试：
@@ -123,7 +136,7 @@ python -m scripts.backfill_recall_domains
 
 ## 接口
 
-旧页面继续使用：
+Web 页面入口：
 
 - `GET /`
 - `GET /api/search`
@@ -143,8 +156,7 @@ python -m scripts.backfill_recall_domains
 
 ## 这次重构的意义
 
-现在的 Web 用起来和旧版很像，这是正常的。  
-这轮工作的重点不是“外观变化”，而是把内部结构从“聊天记录搜索工具”推进到“有 Archive / Memory 分层的记忆系统雏形”。
+这轮工作的重点不是“外观变化”，而是把内部结构从“聊天记录搜索工具”推进到“有 Archive / Memory / Import 分层的记忆系统雏形”。
 
 一句话说：
 

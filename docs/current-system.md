@@ -127,6 +127,6 @@ SelfIndex 当前已经完成了一条最小记忆链路，但还处在新旧结�
 - `engine/database.py`：数据到底存在哪里
 - `engine/memory.py`：原始文档如何变成记忆单元
 - `engine/retriever.py`：搜索结果怎么来的
-- `scripts/import_legacy_data.py`：导入流程怎么走
+- `scripts/import_exports.py`：导入流程怎么走
 
 先理解这 6 个文件，项目的 80% 主干就已经在你脑子里了。

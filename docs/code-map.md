@@ -73,7 +73,7 @@
 
 ## 脚本层
 
-### `scripts/import_legacy_data.py`
+### `scripts/import_exports.py`
 
 目前最重要的导入入口。
 
@@ -105,5 +105,5 @@
 5. `engine/database.py`
 6. `engine/memory.py`
 7. `engine/retriever.py`
-8. `scripts/import_legacy_data.py`
+8. `scripts/import_exports.py`
 9. `tests/test_memory_pipeline.py`
