@@ -153,14 +153,3 @@ Web 页面入口：
 1. [docs/current-system.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/current-system.md)
 2. [docs/code-map.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/code-map.md)
 3. [docs/architecture.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/architecture.md)
-
-## 这次重构的意义
-
-这轮工作的重点不是“外观变化”，而是把内部结构从“聊天记录搜索工具”推进到“有 Archive / Memory / Import 分层的记忆系统雏形”。
-
-一句话说：
-
-- 旧版更像“把对话切块后拿来搜”
-- 现在开始变成“保存原始文档，再从原始文档中生成可重建的记忆单元”
-
-这会直接决定后面能不能继续做摘要、标签、实体、关系、解释性排序，以及多数据源接入。
