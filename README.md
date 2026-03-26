@@ -153,3 +153,4 @@ Web 页面入口：
 1. [docs/current-system.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/current-system.md)
 2. [docs/code-map.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/code-map.md)
 3. [docs/architecture.md](/C:/Users/xiaoj/PycharmProjects/SelfIndex/docs/architecture.md)
+
