@@ -261,6 +261,40 @@ class MemoryPipelineTests(unittest.TestCase):
         )
         self.assertTrue(all(unit["is_embedded"] == 1 for unit in memory_units))
 
+    def test_changed_content_creates_new_revision(self) -> None:
+        import_export_file(
+            self.export_path,
+            sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db,
+            embedder=self.embedder,
+        )
+
+        updated_payload = json.loads(self.export_path.read_text(encoding="utf-8"))
+        updated_payload[0]["mapping"]["node-1"]["message"]["content"]["parts"][0] = (
+            "我更新了这段内容，用来验证 raw document revision 是否被保留下来。"
+        )
+        self.export_path.write_text(
+            json.dumps(updated_payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        import_export_file(
+            self.export_path,
+            sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db,
+            embedder=self.embedder,
+        )
+
+        self.assertEqual(self.sqlite_db.count_rows("raw_documents"), 2)
+        self.assertEqual(self.sqlite_db.count_rows("raw_document_revisions"), 3)
+
+        raw_document = self.sqlite_db.get_raw_document("chatgpt:conversation_message:msg-1")
+        self.assertTrue(raw_document["latest_revision_id"])
+        current_units = self.sqlite_db.get_memory_units_by_raw_document_id(
+            "chatgpt:conversation_message:msg-1"
+        )
+        self.assertTrue(current_units)
+
 
 if __name__ == "__main__":
     unittest.main()

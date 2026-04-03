@@ -74,9 +74,9 @@ class BackfillRecallDomainsTests(unittest.TestCase):
             shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_backfill_marks_sensitive_and_resets_others(self) -> None:
+        self.sqlite_db.seed_protected_terms(["Alice"])
         result = backfill_recall_domains(
             self.sqlite_db,
-            protected_terms=["Alice"],
         )
 
         self.assertEqual(result["updated"], 2)
@@ -86,9 +86,9 @@ class BackfillRecallDomainsTests(unittest.TestCase):
         self.assertEqual(domains["test:note:doc-1:1"], "default")
 
     def test_dry_run_does_not_write_changes(self) -> None:
+        self.sqlite_db.seed_protected_terms(["Alice"])
         result = backfill_recall_domains(
             self.sqlite_db,
-            protected_terms=["Alice"],
             dry_run=True,
         )
 
@@ -98,7 +98,63 @@ class BackfillRecallDomainsTests(unittest.TestCase):
         self.assertEqual(domains["test:note:doc-1:0"], "default")
         self.assertEqual(domains["test:note:doc-1:1"], "sensitive")
 
+    def test_protected_terms_are_stored_encoded(self) -> None:
+        self.sqlite_db.seed_protected_terms(["Alice"])
+
+        with self.sqlite_db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT term_encoded, encoding, domain FROM protected_terms LIMIT 1"
+            ).fetchone()
+
+        self.assertIsNotNone(row)
+        self.assertNotEqual(row["term_encoded"], "Alice")
+        self.assertEqual(row["encoding"], "base64")
+        decoded = self.sqlite_db.list_protected_terms()
+        self.assertIn("Alice", [item["term"] for item in decoded])
+
+    def test_backfill_can_match_title_not_only_content(self) -> None:
+        self.sqlite_db.upsert_raw_document(
+            {
+                "raw_document_id": "test:note:title-doc",
+                "source": "test",
+                "source_type": "note",
+                "external_id": "title-doc",
+                "root_document_id": None,
+                "title": "Alice private notebook",
+                "author": "me",
+                "created_at": "2026-03-23 10:00:00",
+                "content": "harmless content",
+                "content_hash": "title-hash",
+                "raw_payload": "{}",
+                "metadata_json": "{}",
+            }
+        )
+        self.sqlite_db.replace_memory_units(
+            "test:note:title-doc",
+            [
+                {
+                    "memory_unit_id": "test:note:title-doc:0",
+                    "raw_document_id": "test:note:title-doc",
+                    "unit_index": 0,
+                    "unit_type": "chunk",
+                    "recall_domain": "default",
+                    "content": "harmless content",
+                    "summary": "harmless",
+                    "start_char": 0,
+                    "end_char": 10,
+                    "embedding_version": "test",
+                    "metadata_json": "{}",
+                    "is_embedded": 0,
+                }
+            ],
+        )
+        self.sqlite_db.seed_protected_terms(["Alice"])
+
+        backfill_recall_domains(self.sqlite_db)
+
+        rows = self.sqlite_db.get_memory_units_by_raw_document_id("test:note:title-doc")
+        self.assertEqual(rows[0]["recall_domain"], "sensitive")
+
 
 if __name__ == "__main__":
     unittest.main()
-

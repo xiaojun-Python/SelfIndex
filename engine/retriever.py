@@ -153,6 +153,8 @@ def search_memory(
         detail = details_by_id.get(memory_unit_id)
         if detail is None:
             continue
+        if not detail.get("is_active", 1):
+            continue
         detail_domain = detail["recall_domain"] if "recall_domain" in detail.keys() else "default"
         if (detail_domain or "default") not in parsed.allowed_domains:
             continue
@@ -190,6 +192,8 @@ def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, An
     """返回单个记忆单元的详情，以及它可追溯的原始文档。"""
     detail = sqlite_db.get_memory_unit_detail(memory_unit_id)
     if detail is None:
+        return None
+    if not detail.get("is_active", 1):
         return None
 
     memory_metadata = json.loads(detail["memory_metadata_json"]) if detail["memory_metadata_json"] else {}

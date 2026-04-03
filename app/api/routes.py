@@ -233,29 +233,36 @@ def update_document(chunk_id):
             "raw_payload": json.dumps(raw_document.get("raw_payload") or {}, ensure_ascii=False),
             "metadata_json": json.dumps(raw_document.get("metadata") or {}, ensure_ascii=False),
         }
-        new_memory_units = build_memory_units(
-            updated_raw_document,
-            embedding_version=settings.embedding_model,
-            protected_terms=settings.protected_terms,
-        )
-        sqlite_db.upsert_raw_document(updated_raw_document)
-        old_memory_unit_ids = sqlite_db.replace_memory_units(
-            updated_raw_document["raw_document_id"],
-            new_memory_units,
-        )
-        vector_db.delete_vectors(old_memory_unit_ids)
-        new_vector_ids, embeddings, metadatas, documents = _vector_payload(
-            new_memory_units,
-            updated_raw_document,
-        )
-        if new_vector_ids:
-            vector_db.add_vectors(
-                ids=new_vector_ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=documents,
+        upsert_result = sqlite_db.upsert_raw_document(updated_raw_document)
+        revision_id = upsert_result["revision_id"]
+
+        if upsert_result["revision_changed"]:
+            new_memory_units = build_memory_units(
+                updated_raw_document,
+                revision_id=revision_id,
+                embedding_version=settings.embedding_model,
+                protected_rules=sqlite_db.list_protected_terms(),
             )
-            sqlite_db.mark_memory_units_as_embedded(new_vector_ids)
+            sqlite_db.insert_memory_units(new_memory_units)
+            previous_revision_id = upsert_result.get("previous_revision_id")
+            if previous_revision_id and previous_revision_id != revision_id:
+                vector_db.delete_vectors(sqlite_db.get_memory_unit_ids_by_revision(previous_revision_id))
+            new_vector_ids, embeddings, metadatas, documents = _vector_payload(
+                new_memory_units,
+                updated_raw_document,
+            )
+            if new_vector_ids:
+                vector_db.add_vectors(
+                    ids=new_vector_ids,
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                    documents=documents,
+                )
+                sqlite_db.mark_memory_units_as_embedded(new_vector_ids)
+        else:
+            new_memory_units = sqlite_db.get_memory_units_by_raw_document_id(
+                updated_raw_document["raw_document_id"]
+            )
     except Exception as exc:
         return render_template(
             "document_form.html",

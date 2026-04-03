@@ -1,109 +1,149 @@
 # 代码地图
 
-这份文档不是讲理念，而是讲“代码都放在哪、该从哪开始看”。
+这份文档回答：
 
-## Web 层
+“如果我要读当前项目，先看哪些文件最值。”
+
+## 入口层
 
 ### `app/main.py`
 
-本地开发入口。
+本地运行入口。
 
 ### `app/__init__.py`
 
-应用工厂，负责把这些东西装起来：
+应用工厂。负责：
 
-- 配置
-- SQLite
-- Chroma
-- 启动自举逻辑
+- 读取 settings
+- 初始化 SQLite / SQLCipher
+- 初始化 Chroma
+- 注册 Flask 路由
+
+## Web 层
 
 ### `app/api/routes.py`
 
-路由总入口。
+当前最核心的 Web 路由文件。
 
-里面同时有：
+包括：
 
-- 旧 Web 页面继续使用的接口
-- 新记忆链路的 JSON API
+- 搜索
+- 查看详情
+- 编辑保存
+- JSON memory API
 
 ## 配置层
 
 ### `app/core/settings.py`
 
-项目的环境变量、路径和服务参数都在这里集中读取。
+集中读取 `.env` 与默认配置。
+
+重点看：
+
+- 数据库路径
+- Chroma 路径
+- embedding 配置
+- 解锁前缀
 
 ## 引擎层
 
 ### `engine/init_db.py`
 
-定义数据库 schema。
+当前 schema 与轻量迁移入口。
 
-如果你想知道“系统现在有哪些表”，先看这里。
+重点：
+
+- `raw_documents`
+- `raw_document_revisions`
+- `memory_units`
+- `protected_terms`
+- `import_jobs`
 
 ### `engine/database.py`
 
-最核心的数据访问层。
+当前最关键的后端文件之一。
 
-如果你想知道：
+负责：
 
-- 数据怎么写进 SQLite
-- 向量怎么写进 Chroma
-- 新旧两套模型怎么共存
-
-就看这个文件。
-
-### `engine/bootstrap.py`
-
-启动时做的额外工作：
-
-- 旧数据投影到新模型
-- 预热 embedding
-
-### `engine/chunker.py`
-
-文本切分。
+- SQLite 读写
+- revisions 落盘
+- inactive 标记
+- protected_terms 读写
+- memory detail 批量读取
+- Chroma 访问封装
 
 ### `engine/memory.py`
 
-把原始文档变成记忆单元。
+负责：
+
+- 构建 `raw_document`
+- 构建 `raw_document_revision`
+- 构建 `memory_units`
+- recall_domain 命中范围
 
 ### `engine/retriever.py`
 
-搜索与回溯逻辑。
+负责：
+
+- query 向量化
+- Chroma 搜索
+- recall_domain 过滤
+- inactive 过滤
+- 回溯结构组装
+
+### `engine/query_syntax.py`
+
+负责解锁式查询的前缀解析。
+
+### `engine/protected_terms.py`
+
+负责 `protected_terms` 的编码 / 解码辅助。
 
 ## 脚本层
 
 ### `scripts/import_exports.py`
 
-目前最重要的导入入口。
+导入导出文件的正式入口。
 
-### `scripts/parsers/`
+### `scripts/build_embeddings.py`
 
-不同导出格式的解析器。
+单独运行 embedding workflow。
+
+### `scripts/sync_markdown_directory.py`
+
+同步 markdown 目录，支持：
+
+- 忽略规则
+- 更新检测
+- 删除检测
+
+### `scripts/backfill_recall_domains.py`
+
+按 `protected_terms` 回填 `memory_units.recall_domain`。
+
+### `scripts/manage_protected_terms.py`
+
+管理受保护词规则。
 
 ## 测试层
 
 ### `tests/test_memory_pipeline.py`
 
-最小记忆链路测试。
+覆盖 archive -> memory -> retrieval 主链路。
 
-它验证的是：
+### `tests/test_markdown_sync.py`
 
-- 能导入
-- 能生成新层数据
-- 能检索
-- 能回溯
+覆盖 markdown 同步、忽略规则、更新、删除检测。
 
-## 推荐阅读顺序
+### `tests/test_backfill_recall_domains.py`
 
-如果你想自己系统理解当前项目，建议按下面顺序读：
+覆盖 protected terms、回填、标题命中。
 
-1. `README.md`
-2. `docs/current-system.md`
-3. `app/__init__.py`
-4. `engine/bootstrap.py`
-5. `engine/database.py`
-6. `engine/memory.py`
-7. `engine/retriever.py`
-8. `scripts/import_exports.py`
-9. `tests/test_memory_pipeline.py`
+### `tests/test_unlock_query.py`
+
+覆盖解锁式查询。
+
+### `tests/test_sqlcipher_migration.py`
+
+覆盖 SQLCipher 导出与迁移。
+

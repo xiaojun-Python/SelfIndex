@@ -18,12 +18,27 @@ def get_content_hash(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
+def get_revision_id(raw_document_id: str, content_hash: str) -> str:
+    """Build a stable revision id from the document identity and content hash."""
+    return f"{raw_document_id}:{content_hash[:12]}"
+
+
 def build_summary(text: str, limit: int = 120) -> str:
     """生成一个当前阶段足够轻量的摘要。"""
     cleaned = " ".join((text or "").split())
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[:limit].rstrip() + "..."
+
+
+def build_protected_match_text(
+    *,
+    content: str,
+    title: str | None = None,
+    author: str | None = None,
+) -> str:
+    parts = [title or "", author or "", content or ""]
+    return "\n".join(part for part in parts if part).lower()
 
 
 def build_raw_document(
@@ -57,17 +72,43 @@ def build_raw_document(
     }
 
 
+def build_raw_document_revision(
+    raw_document: dict[str, Any],
+    *,
+    change_type: str = "updated",
+    is_current: int = 1,
+) -> dict[str, Any]:
+    """Build a raw document revision snapshot from the current raw document payload."""
+    revision_id = get_revision_id(raw_document["raw_document_id"], raw_document["content_hash"])
+    return {
+        "revision_id": revision_id,
+        "raw_document_id": raw_document["raw_document_id"],
+        "content": raw_document["content"],
+        "content_hash": raw_document["content_hash"],
+        "title": raw_document.get("title"),
+        "author": raw_document.get("author"),
+        "created_at": raw_document.get("created_at"),
+        "raw_payload": raw_document.get("raw_payload"),
+        "metadata_json": raw_document.get("metadata_json"),
+        "change_type": change_type,
+        "is_current": is_current,
+    }
+
+
 def build_memory_units(
     raw_document: dict[str, Any],
     *,
+    revision_id: str,
     embedding_version: str,
     unit_type: str = "chunk",
+    protected_rules: list[dict[str, Any]] | None = None,
     protected_terms: list[str] | None = None,
     protected_domain: str = "identity",
 ) -> list[dict[str, Any]]:
     """从一条原始文档中切出多条记忆单元。"""
     content = raw_document["content"]
     protected_terms = protected_terms or []
+    protected_rules = protected_rules or []
     chunks = smart_chunking(
         content,
         raw_document.get("title") or "",
@@ -94,20 +135,42 @@ def build_memory_units(
         "created_at": raw_document.get("created_at"),
     }
 
-    protected_terms_lower = [term.lower() for term in protected_terms if term]
+    normalized_rules = [
+        {
+            "term": rule["term"].lower(),
+            "domain": rule.get("domain") or "sensitive",
+        }
+        for rule in protected_rules
+        if rule.get("term")
+    ]
+    normalized_rules.extend(
+        {
+            "term": term.lower(),
+            "domain": protected_domain,
+        }
+        for term in protected_terms
+        if term
+    )
 
     memory_units: list[dict[str, Any]] = []
     for index, chunk in enumerate(chunks):
         chunk_content = chunk["content"]
         recall_domain = "default"
-        if protected_terms_lower:
-            lowered = chunk_content.lower()
-            if any(term in lowered for term in protected_terms_lower):
-                recall_domain = protected_domain
+        if normalized_rules:
+            lowered = build_protected_match_text(
+                content=chunk_content,
+                title=raw_document.get("title"),
+                author=raw_document.get("author"),
+            )
+            for rule in normalized_rules:
+                if rule["term"] in lowered:
+                    recall_domain = rule["domain"]
+                    break
 
         memory_units.append(
             {
-                "memory_unit_id": f"{raw_document['raw_document_id']}:{index}",
+                "memory_unit_id": f"{revision_id}:{index}",
+                "revision_id": revision_id,
                 "raw_document_id": raw_document["raw_document_id"],
                 "unit_index": index,
                 "unit_type": unit_type,

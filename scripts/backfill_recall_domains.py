@@ -7,26 +7,40 @@ from pathlib import Path
 
 from app.core.settings import settings
 from engine.database import DatabaseManager
+from engine.memory import build_protected_match_text
 
 
-def _matches_protected_terms(content: str, protected_terms: list[str]) -> bool:
-    lowered = (content or "").lower()
+def _matches_protected_terms(match_text: str, protected_terms: list[str]) -> bool:
+    lowered = (match_text or "").lower()
     return any(term.lower() in lowered for term in protected_terms if term.strip())
 
 
 def backfill_recall_domains(
     sqlite_db: DatabaseManager,
     *,
-    protected_terms: list[str],
+    protected_terms: list[str] | None = None,
+    protected_rules: list[dict] | None = None,
     protected_domain: str = "sensitive",
     default_domain: str = "default",
     dry_run: bool = False,
 ) -> dict[str, int]:
-    protected_terms = [term.strip() for term in protected_terms if term.strip()]
+    if protected_rules is None:
+        if protected_terms is None:
+            protected_rules = sqlite_db.list_protected_terms()
+        else:
+            protected_rules = [
+                {"term": term.strip(), "domain": protected_domain}
+                for term in protected_terms
+                if term.strip()
+            ]
 
     with sqlite_db.get_connection() as conn:
         rows = conn.execute(
-            "SELECT memory_unit_id, content, recall_domain FROM memory_units"
+            """
+            SELECT mu.memory_unit_id, mu.content, mu.recall_domain, rd.title, rd.author
+            FROM memory_units mu
+            JOIN raw_documents rd ON rd.raw_document_id = mu.raw_document_id
+            """
         ).fetchall()
 
         updates: list[tuple[str, str]] = []
@@ -35,11 +49,19 @@ def backfill_recall_domains(
         unchanged_count = 0
 
         for row in rows:
-            target_domain = (
-                protected_domain
-                if _matches_protected_terms(row["content"], protected_terms)
-                else default_domain
+            target_domain = default_domain
+            match_text = build_protected_match_text(
+                content=row["content"],
+                title=row.get("title"),
+                author=row.get("author"),
             )
+            for rule in protected_rules:
+                term = (rule.get("term") or "").strip()
+                if not term:
+                    continue
+                if _matches_protected_terms(match_text, [term]):
+                    target_domain = rule.get("domain") or protected_domain
+                    break
 
             if row["recall_domain"] == target_domain:
                 unchanged_count += 1
@@ -93,7 +115,6 @@ if __name__ == "__main__":
     sqlite_db = DatabaseManager(Path(args.db))
     result = backfill_recall_domains(
         sqlite_db,
-        protected_terms=settings.protected_terms,
         dry_run=args.dry_run,
     )
 
@@ -102,4 +123,3 @@ if __name__ == "__main__":
       "标记为敏感 {marked_protected} 个，标记为默认 {marked_default} 个，"
       "未更改 {unchanged} 个。".format(**result)
     )
-

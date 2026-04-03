@@ -94,7 +94,7 @@ def import_export_file(
             {
                 "embedding_model": settings.embedding_model,
                 "embedding_enabled": not skip_embedding,
-                "protected_terms": settings.protected_terms,
+                "protected_terms_source": "database",
             },
             ensure_ascii=False,
         ),
@@ -103,6 +103,7 @@ def import_export_file(
 
     imported_documents = 0
     imported_memory_units = 0
+    protected_rules = sqlite_db.list_protected_terms()
 
     try:
         with sqlite_db.transaction() as conn:
@@ -137,23 +138,38 @@ def import_export_file(
                         },
                     )
 
-                    memory_units = build_memory_units(
-                        raw_document,
-                        embedding_version=settings.embedding_model,
-                        protected_terms=settings.protected_terms,
-                    )
+                    upsert_result = sqlite_db.upsert_raw_document(raw_document, conn=conn)
+                    revision_id = upsert_result["revision_id"]
 
-                    sqlite_db.upsert_raw_document(raw_document, conn=conn)
-                    old_memory_unit_ids = sqlite_db.replace_memory_units(
-                        raw_document["raw_document_id"],
-                        memory_units,
-                        conn=conn,
-                    )
+                    if upsert_result["revision_changed"]:
+                        memory_units = build_memory_units(
+                            raw_document,
+                            revision_id=revision_id,
+                            embedding_version=settings.embedding_model,
+                            protected_rules=protected_rules,
+                        )
+                        sqlite_db.insert_memory_units(memory_units, conn=conn)
+                    else:
+                        memory_units = sqlite_db.get_memory_units_by_raw_document_id(
+                            raw_document["raw_document_id"]
+                        )
 
-                    if old_memory_unit_ids and vector_db is not None:
-                        vector_db.delete_vectors(old_memory_unit_ids)
+                    previous_revision_id = upsert_result.get("previous_revision_id")
+                    if (
+                        previous_revision_id
+                        and previous_revision_id != revision_id
+                        and vector_db is not None
+                    ):
+                        vector_db.delete_vectors(
+                            sqlite_db.get_memory_unit_ids_by_revision(previous_revision_id)
+                        )
 
-                    if memory_units and vector_db is not None and embedder is not None:
+                    if (
+                        upsert_result["revision_changed"]
+                        and memory_units
+                        and vector_db is not None
+                        and embedder is not None
+                    ):
                         texts = [unit["content"] for unit in memory_units]
                         embeddings = embedder.embed_documents(texts)
                         metadatas = [
