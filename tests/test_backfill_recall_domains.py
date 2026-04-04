@@ -80,6 +80,8 @@ class BackfillRecallDomainsTests(unittest.TestCase):
         )
 
         self.assertEqual(result["updated"], 2)
+        self.assertEqual(result["marked_sensitive"], 1)
+        self.assertEqual(result["marked_default"], 1)
         rows = self.sqlite_db.get_memory_units_by_raw_document_id("test:note:doc-1")
         domains = {row["memory_unit_id"]: row["recall_domain"] for row in rows}
         self.assertEqual(domains["test:note:doc-1:0"], "sensitive")
@@ -154,6 +156,17 @@ class BackfillRecallDomainsTests(unittest.TestCase):
 
         rows = self.sqlite_db.get_memory_units_by_raw_document_id("test:note:title-doc")
         self.assertEqual(rows[0]["recall_domain"], "sensitive")
+
+    def test_backfill_can_mark_identity_domain(self) -> None:
+        self.sqlite_db.seed_protected_terms(["Alice"], domain="identity")
+
+        result = backfill_recall_domains(self.sqlite_db)
+
+        self.assertEqual(result["marked_identity"], 1)
+        rows = self.sqlite_db.get_memory_units_by_raw_document_id("test:note:doc-1")
+        domains = {row["memory_unit_id"]: row["recall_domain"] for row in rows}
+        self.assertEqual(domains["test:note:doc-1:0"], "identity")
+        self.assertEqual(domains["test:note:doc-1:1"], "default")
 
 
 if __name__ == "__main__":

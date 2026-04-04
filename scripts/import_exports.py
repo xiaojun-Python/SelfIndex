@@ -5,6 +5,17 @@
 2. 切分成 memory units
 3. 写入 SQLite
 4. 写入 Chroma 向量索引
+
+典型用途：
+    作为 CLI 工具直接运行，用于批量导入 AI 对话平台的导出文件。
+    支持的平台：OpenAI (ChatGPT)、DeepSeek、Grok。
+
+使用示例：
+    # 完整导入（包括向量索引）
+    python -m scripts.import_exports --file ./exports/chatgpt.json
+
+    # 仅导入原始文档和 memory units，跳过向量生成
+    python -m scripts.import_exports --file ./exports/chatgpt.json --skip-embedding
 """
 
 from __future__ import annotations
@@ -25,7 +36,20 @@ from scripts.parsers.grok_parser import parse_format_grok
 
 
 def select_parser(file_path: str):
-    """根据文件名做一个当前阶段足够简单的解析器选择。"""
+    """根据文件名选择对应的解析器。
+
+    当前实现基于文件名字符串匹配进行解析器选择，这是一种简单但有效的启发式方法。
+    后续如有需要，可扩展为同时读取文件内容进行格式检测。
+
+    参数:
+        file_path: 待解析文件的路径字符串。
+
+    返回:
+        对应平台的解析函数：
+        - grok  -> parse_format_grok
+        - deepseek -> parse_format_deepseek
+        - 其他（默认）-> parse_format_openai
+    """
     lower_path = file_path.lower()
     if "grok" in lower_path:
         return parse_format_grok
@@ -35,7 +59,20 @@ def select_parser(file_path: str):
 
 
 def _as_json_ready(value: Any) -> Any:
-    """把 Decimal 等对象转换为可序列化的普通结构。"""
+    """将不可 JSON 序列化的对象（如 Decimal）递归转换为可序列化类型。
+
+    递归处理嵌套的 dict 和 list 结构，确保所有层级都被转换。
+
+    参数:
+        value: 任意类型的待转换值。
+
+    返回:
+        转换后的 JSON 兼容值：
+        - Decimal -> float
+        - dict -> 键值递归转换后的新 dict
+        - list -> 元素递归转换后的新 list
+        - 其他 -> 原样返回
+    """
     if isinstance(value, Decimal):
         return float(value)
     if isinstance(value, dict):
@@ -46,6 +83,16 @@ def _as_json_ready(value: Any) -> Any:
 
 
 def _get_embedder(embedder: Any = None) -> Any:
+    """获取文本嵌入器（embedder）实例。
+
+    如果调用者已传入 embedder，则直接返回；否则从 embedding_manager 获取全局单例。
+
+    参数:
+        embedder: 可选的已初始化 embedder 实例，传入时优先使用。
+
+    返回:
+        embedder 实例，用于将文本转换为向量表示。
+    """
     if embedder is not None:
         return embedder
 
@@ -55,6 +102,22 @@ def _get_embedder(embedder: Any = None) -> Any:
 
 
 def _minimal_message_payload(message: dict[str, Any]) -> dict[str, Any]:
+    """从消息字典中提取最小可用的负载信息。
+
+    仅保留消息的核心元数据字段，过滤掉 content 等大字段，
+    以减少存储空间并聚焦于可追溯性所需的最小信息集。
+
+    参数:
+        message: 原始消息字典，通常包含 message_id、sender_type、model 等字段。
+
+    返回:
+        仅包含核心元数据的字典，包含以下字段：
+        - message_id: 消息唯一标识
+        - sender_type: 发送者类型（如 user、assistant）
+        - model: 使用的 AI 模型名称
+        - sequence: 消息在对话中的顺序编号
+        - timestamp: 消息创建时间戳
+    """
     return {
         "message_id": message.get("message_id"),
         "sender_type": message.get("sender_type"),
@@ -65,11 +128,26 @@ def _minimal_message_payload(message: dict[str, Any]) -> dict[str, Any]:
 
 
 def _hash_file(file_path: str | Path) -> str:
+    """计算文件的 SHA-256 哈希值。
+
+    采用分块读取方式（每块 1MB）计算哈希，适用于大文件且内存占用可控。
+
+    参数:
+        file_path: 文件路径，支持 str 或 Path 类型。
+
+    返回:
+        文件内容的 64 位十六进制哈希字符串。
+    """
     digest = hashlib.sha256()
     with Path(file_path).open("rb") as file_obj:
         for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _build_test_path(path: Path) -> Path:
+    """Return a sibling test path like ``name-test.ext``."""
+    return path.with_name(f"{path.stem}-test{path.suffix}")
 
 
 def import_export_file(
@@ -229,6 +307,23 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--file", required=True, type=str, help="Path to the exported JSON file.")
     parser.add_argument(
+        "--db",
+        type=str,
+        default=None,
+        help="Optional database path override. Defaults to SQLITE_DB_PATH.",
+    )
+    parser.add_argument(
+        "--chroma",
+        type=str,
+        default=None,
+        help="Optional Chroma path override. Defaults to CHROMA_DB_PATH.",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Write into sibling test database / vector store instead of the main paths.",
+    )
+    parser.add_argument(
         "--skip-embedding",
         action="store_true",
         help="Import only raw_documents / memory_units and skip embedding + Chroma indexing.",
@@ -238,8 +333,15 @@ def build_cli() -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     args = build_cli().parse_args()
-    sqlite_db = DatabaseManager(settings.sqlite_db_path)
-    vector_db = None if args.skip_embedding else VectorManager(settings.chroma_db_path)
+    sqlite_db_path = Path(args.db) if args.db else settings.sqlite_db_path
+    chroma_db_path = Path(args.chroma) if args.chroma else settings.chroma_db_path
+
+    if args.test:
+        sqlite_db_path = _build_test_path(sqlite_db_path)
+        chroma_db_path = _build_test_path(chroma_db_path)
+
+    sqlite_db = DatabaseManager(sqlite_db_path)
+    vector_db = None if args.skip_embedding else VectorManager(chroma_db_path)
     result = import_export_file(
         args.file,
         sqlite_db=sqlite_db,
@@ -248,5 +350,6 @@ if __name__ == "__main__":
     )
     print(
         "Imported raw documents: "
-        f"{result['raw_documents']}, memory units: {result['memory_units']}"
+        f"{result['raw_documents']}, memory units: {result['memory_units']}. "
+        f"Database: {sqlite_db_path}"
     )

@@ -22,4 +22,7 @@ data/*
 legacy/
 legacy/*
 
+*.ipynb
+.ipynb_checkpoints/
+
 

@@ -1,4 +1,4 @@
-"""Backfill `memory_units.recall_domain` using configured protected terms."""
+"""Backfill ``memory_units.recall_domain`` using protected term rules."""
 
 from __future__ import annotations
 
@@ -8,6 +8,12 @@ from pathlib import Path
 from app.core.settings import settings
 from engine.database import DatabaseManager
 from engine.memory import build_protected_match_text
+
+DOMAIN_PRIORITY = {
+    "default": 0,
+    "identity": 1,
+    "sensitive": 2,
+}
 
 
 def _matches_protected_terms(match_text: str, protected_terms: list[str]) -> bool:
@@ -44,9 +50,8 @@ def backfill_recall_domains(
         ).fetchall()
 
         updates: list[tuple[str, str]] = []
-        protected_count = 0
-        default_count = 0
         unchanged_count = 0
+        updated_by_domain: dict[str, int] = {}
 
         for row in rows:
             target_domain = default_domain
@@ -55,23 +60,27 @@ def backfill_recall_domains(
                 title=row.get("title"),
                 author=row.get("author"),
             )
+            matched_domains: list[str] = []
+
             for rule in protected_rules:
                 term = (rule.get("term") or "").strip()
                 if not term:
                     continue
                 if _matches_protected_terms(match_text, [term]):
-                    target_domain = rule.get("domain") or protected_domain
-                    break
+                    matched_domains.append(rule.get("domain") or protected_domain)
+
+            if matched_domains:
+                target_domain = max(
+                    matched_domains,
+                    key=lambda domain: DOMAIN_PRIORITY.get(domain, DOMAIN_PRIORITY[protected_domain]),
+                )
 
             if row["recall_domain"] == target_domain:
                 unchanged_count += 1
                 continue
 
             updates.append((target_domain, row["memory_unit_id"]))
-            if target_domain == protected_domain:
-                protected_count += 1
-            else:
-                default_count += 1
+            updated_by_domain[target_domain] = updated_by_domain.get(target_domain, 0) + 1
 
         if updates and not dry_run:
             conn.executemany(
@@ -86,15 +95,16 @@ def backfill_recall_domains(
     return {
         "total": len(rows),
         "updated": len(updates),
-        "marked_protected": protected_count,
-        "marked_default": default_count,
         "unchanged": unchanged_count,
+        "marked_default": updated_by_domain.get(default_domain, 0),
+        "marked_identity": updated_by_domain.get("identity", 0),
+        "marked_sensitive": updated_by_domain.get("sensitive", 0),
     }
 
 
 def build_cli() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Backfill memory_units.recall_domain using PROTECTED_TERMS."
+        description="Backfill memory_units.recall_domain using protected_terms rules."
     )
     parser.add_argument(
         "--db",
@@ -119,7 +129,7 @@ if __name__ == "__main__":
     )
 
     print(
-      "扫描了 {total} 个内存单元，更新了 {updated} 个，"
-      "标记为敏感 {marked_protected} 个，标记为默认 {marked_default} 个，"
-      "未更改 {unchanged} 个。".format(**result)
+        "Scanned {total} memory units; updated {updated}. "
+        "Marked default={marked_default}, identity={marked_identity}, "
+        "sensitive={marked_sensitive}; unchanged={unchanged}.".format(**result)
     )

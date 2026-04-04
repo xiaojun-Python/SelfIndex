@@ -1,4 +1,4 @@
-"""ChatGPT / OpenAI 导出解析器。"""
+"""ChatGPT / OpenAI json导入解析器。"""
 
 from __future__ import annotations
 

@@ -36,7 +36,7 @@ SelfIndex 的当前目标是：
 当前落地：
 
 - `memory_units`
-- Chroma collection
+- `Chroma collection`
 
 ### 3. Recall Layer
 
