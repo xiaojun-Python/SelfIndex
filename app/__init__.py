@@ -9,7 +9,11 @@
 
 from __future__ import annotations
 
+import time
+
 from flask import Flask, render_template
+from flask import g
+from flask import request
 
 
 def create_app() -> Flask:
@@ -31,6 +35,24 @@ def create_app() -> Flask:
     app.config["SQLITE_DB"] = DatabaseManager(settings.sqlite_db_path)
     app.config["VECTOR_DB"] = VectorManager(settings.chroma_db_path)
     warm_up_search_stack()
+
+    @app.before_request
+    def _mark_request_started():
+        g._request_started_at = time.perf_counter()
+
+    @app.after_request
+    def _log_request(response):
+        started_at = getattr(g, "_request_started_at", None)
+        duration_ms = 0.0
+        if started_at is not None:
+            duration_ms = (time.perf_counter() - started_at) * 1000
+
+        print(
+            f"[web] {request.method} {request.path} -> {response.status_code} "
+            f"({duration_ms:.1f} ms)",
+            flush=True,
+        )
+        return response
 
     @app.route("/")
     def index():

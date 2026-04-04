@@ -4,6 +4,7 @@ import shutil
 import unittest
 from pathlib import Path
 
+from app.core.settings import settings
 from engine.database import DatabaseManager
 from engine.retriever import search_memory
 
@@ -121,7 +122,7 @@ class UnlockQueryTests(unittest.TestCase):
         results = search_memory(
             self.sqlite_db,
             self.vector_db,
-            query=": Alice",
+            query=f"{settings.unlock_prefix_identity} Alice",
             limit=5,
             embedder=self.embedder,
         )
@@ -131,4 +132,3 @@ class UnlockQueryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

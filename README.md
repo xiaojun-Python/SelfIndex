@@ -42,6 +42,18 @@ SelfIndex 是一个面向长期使用的个人记忆系统原型。
 python -m app.main
 ```
 
+启动桌面壳（系统托盘 + 后台页）：
+
+```bash
+python -m desktop.main
+```
+
+如果希望脱离终端窗口运行：
+
+```bash
+pythonw -m desktop.main
+```
+
 导入导出文件：
 
 ```bash
@@ -116,4 +128,3 @@ UNLOCK_PREFIX_SENSITIVE=!
 2. `docs/architecture.md`
 3. `docs/database-structure.md`
 4. `docs/code-map.md`
-
