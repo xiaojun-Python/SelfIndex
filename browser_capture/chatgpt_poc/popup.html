@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>SelfIndex Capture</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="app">
+      <h1>ChatGPT Capture</h1>
+      <p class="hint">抓取当前页面里已加载的可见对话，导出成 SelfIndex 可用的标准化 JSON。</p>
+
+      <label class="field">
+        <span>SelfIndex 接口</span>
+        <input
+          id="endpoint-input"
+          type="text"
+          value="http://127.0.0.1:5000/api/ingest/chatgpt-browser"
+          spellcheck="false"
+        >
+      </label>
+
+      <div class="actions">
+        <button id="capture-btn" type="button">抓取当前对话</button>
+        <button id="send-btn" type="button" disabled>同步新增内容</button>
+        <button id="copy-btn" type="button" disabled>复制 JSON</button>
+        <button id="download-btn" type="button" disabled>下载 JSON</button>
+      </div>
+
+      <section class="summary" id="summary">
+        <div>等待抓取…</div>
+      </section>
+
+      <section class="sync-status" id="sync-status">
+        <div>等待检查当前会话…</div>
+      </section>
+
+      <textarea id="output" spellcheck="false" placeholder="抓取结果会显示在这里"></textarea>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

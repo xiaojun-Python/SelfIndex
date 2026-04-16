@@ -22,6 +22,7 @@ from engine.retriever import (
     search,
     search_memory,
 )
+from scripts.import_exports import import_chatgpt_browser_payload
 
 bp = Blueprint("main", __name__)
 EMBEDDING_VERSION = "bge-small-zh-v1.5"
@@ -29,6 +30,25 @@ EMBEDDING_VERSION = "bge-small-zh-v1.5"
 
 def _hash_text(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+def _is_local_request() -> bool:
+    remote_addr = (request.remote_addr or "").strip()
+    return remote_addr in {"", "127.0.0.1", "::1"}
+
+
+def _with_ingest_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Max-Age"] = "600"
+    return response
+
+
+def _json_error(message: str, status_code: int):
+    response = jsonify({"ok": False, "error": message})
+    response.status_code = status_code
+    return response
 
 
 def _render_search_results():
@@ -146,6 +166,59 @@ def search_memory_view():
     return jsonify({"query": query, "count": len(results), "results": results})
 
 
+@bp.route("/api/ingest/chatgpt-browser", methods=["GET", "POST", "OPTIONS"])
+def ingest_chatgpt_browser_payload():
+    """接收浏览器扩展直接发送的 ChatGPT 对话 JSON，并导入 SelfIndex。"""
+    if request.method == "OPTIONS":
+        return _with_ingest_cors(jsonify({"ok": True}))
+
+    if request.method == "GET":
+        return _with_ingest_cors(
+            jsonify(
+                {
+                    "ok": True,
+                    "endpoint": "chatgpt-browser-ingest",
+                    "method": "POST",
+                    "local_only": True,
+                    "message": "Endpoint is available. Send normalized ChatGPT browser JSON via POST.",
+                }
+            )
+        )
+
+    if not _is_local_request():
+        return _with_ingest_cors(_json_error("Only local requests are allowed.", 403))
+
+    payload = request.get_json(silent=True)
+    if not payload:
+        return _with_ingest_cors(_json_error("Missing JSON payload.", 400))
+
+    conversation_id = None
+    if isinstance(payload, dict):
+        conversation_id = payload.get("conversation_id")
+    skip_embedding = bool(request.args.get("skip_embedding", "").strip().lower() in {"1", "true", "yes"})
+
+    try:
+        result = import_chatgpt_browser_payload(
+            payload,
+            sqlite_db=current_app.config["SQLITE_DB"],
+            vector_db=None if skip_embedding else current_app.config["VECTOR_DB"],
+            skip_embedding=skip_embedding,
+        )
+    except Exception as exc:
+        return _with_ingest_cors(_json_error(f"Import failed: {exc}", 500))
+
+    return _with_ingest_cors(
+        jsonify(
+            {
+                "ok": True,
+                "conversation_id": conversation_id,
+                "skip_embedding": skip_embedding,
+                **result,
+            }
+        )
+    )
+
+
 @bp.route("/api/memory/<memory_unit_id>")
 def memory_unit_detail(memory_unit_id):
     """返回记忆单元和原始文档的完整回溯信息。"""
@@ -225,6 +298,7 @@ def update_document(chunk_id):
             "source_type": raw_document["source_type"],
             "external_id": raw_document["external_id"],
             "root_document_id": raw_document["root_document_id"],
+            "sequence": raw_document.get("sequence"),
             "title": title,
             "author": sender,
             "created_at": raw_document["created_at"],

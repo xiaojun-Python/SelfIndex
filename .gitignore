@@ -25,4 +25,8 @@ legacy/*
 *.ipynb
 .ipynb_checkpoints/
 
+.gitignore
+
+CLAUDE.md
+
 

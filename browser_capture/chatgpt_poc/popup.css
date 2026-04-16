@@ -1,0 +1,105 @@
+body {
+  margin: 0;
+  font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  background: #f5f1e8;
+  color: #1f1a14;
+}
+
+.app {
+  width: 360px;
+  padding: 16px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #5f5447;
+}
+
+.field {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.field span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #4b4034;
+}
+
+.field input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d6ccbe;
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #fffdf9;
+  color: #1f1a14;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  background: #1f6f5f;
+  color: #fff;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  background: #b9c3be;
+  color: #eef2ef;
+}
+
+.summary {
+  min-height: 40px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #fffaf2;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4b4034;
+}
+
+.sync-status {
+  min-height: 40px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #eef7f3;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #285848;
+}
+
+textarea {
+  width: 100%;
+  min-height: 280px;
+  resize: vertical;
+  border: 1px solid #d6ccbe;
+  border-radius: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+  background: #fffdf9;
+  color: #1f1a14;
+  font-size: 12px;
+  line-height: 1.5;
+}

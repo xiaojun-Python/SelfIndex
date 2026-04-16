@@ -220,6 +220,7 @@ def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, An
             "source_type": detail["source_type"],
             "external_id": detail["external_id"],
             "root_document_id": detail["root_document_id"],
+            "sequence": detail["sequence"],
             "title": detail["title"],
             "author": detail["author"],
             "created_at": normalize_timestamp(detail["created_at"]),

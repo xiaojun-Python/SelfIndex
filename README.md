@@ -102,6 +102,12 @@ python -m scripts.backfill_recall_domains --dry-run
 python -m scripts.backfill_recall_domains
 ```
 
+审计 ChatGPT 会话顺序 PoC：
+
+```bash
+python -m scripts.audit_chatgpt_order --conversation-id your-conversation-id --export data/raw_exports/chatgpt_export.json --browser-sample path/to/chatgpt_browser_sample.json
+```
+
 运行测试：
 
 ```bash

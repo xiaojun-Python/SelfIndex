@@ -7,8 +7,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import chromadb
-
 from app.core.settings import settings
 from engine.init_db import init_database
 from engine.memory import build_raw_document_revision, get_revision_id
@@ -22,6 +20,10 @@ class VectorManager:
     def __init__(self, persist_directory: str | Path) -> None:
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
+        try:
+            import chromadb
+        except Exception as exc:  # pragma: no cover - depends on local runtime
+            raise RuntimeError("VectorManager requires a working chromadb installation.") from exc
         self.client = chromadb.PersistentClient(path=str(self.persist_directory))
         self.collection = self.client.get_or_create_collection(
             name="my_knowledge_chunks",
@@ -195,6 +197,7 @@ class DatabaseManager:
                     source_type,
                     external_id,
                     root_document_id,
+                    sequence,
                     title,
                     author,
                     created_at,
@@ -205,12 +208,13 @@ class DatabaseManager:
                     is_active,
                     raw_payload,
                     metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(raw_document_id) DO UPDATE SET
                     source = excluded.source,
                     source_type = excluded.source_type,
                     external_id = excluded.external_id,
                     root_document_id = excluded.root_document_id,
+                    sequence = excluded.sequence,
                     title = excluded.title,
                     author = excluded.author,
                     created_at = excluded.created_at,
@@ -229,6 +233,7 @@ class DatabaseManager:
                     raw_document["source_type"],
                     raw_document["external_id"],
                     raw_document.get("root_document_id"),
+                    raw_document.get("sequence"),
                     raw_document.get("title"),
                     raw_document.get("author"),
                     raw_document.get("created_at"),
@@ -497,7 +502,7 @@ class DatabaseManager:
         try:
             document = conn.execute(
                 """
-                SELECT raw_document_id, title, author, created_at, content, content_hash,
+                SELECT raw_document_id, sequence, title, author, created_at, content, content_hash,
                        latest_revision_id, raw_payload, metadata_json, is_active
                 FROM raw_documents
                 WHERE raw_document_id = ?
@@ -695,7 +700,7 @@ class DatabaseManager:
             return conn.execute(
                 """
                 SELECT raw_document_id, source, source_type, external_id, root_document_id,
-                       title, author, created_at, imported_at, content, content_hash,
+                       sequence, title, author, created_at, imported_at, content, content_hash,
                        current_content_hash, latest_revision_id, is_active, raw_payload, metadata_json
                 FROM raw_documents
                 WHERE raw_document_id = ?
@@ -740,6 +745,7 @@ class DatabaseManager:
                 rd.source_type,
                 rd.external_id,
                 rd.root_document_id,
+                rd.sequence,
                 rd.title,
                 rd.author,
                 rd.created_at,

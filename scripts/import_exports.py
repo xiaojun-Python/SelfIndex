@@ -25,11 +25,14 @@ import hashlib
 import json
 from decimal import Decimal
 from pathlib import Path
+from typing import Iterable
 from typing import Any
 
 from app.core.settings import settings
 from engine.database import DatabaseManager, VectorManager
 from engine.memory import build_memory_units, build_raw_document
+from scripts.parsers.chatgpt_browser_parser import parse_chatgpt_browser_payload
+from scripts.parsers.chatgpt_browser_parser import parse_format_chatgpt_browser
 from scripts.parsers.chatgpt_parser import parse_format_openai
 from scripts.parsers.deepseek_parser import parse_format_deepseek
 from scripts.parsers.grok_parser import parse_format_grok
@@ -51,6 +54,8 @@ def select_parser(file_path: str):
         - 其他（默认）-> parse_format_openai
     """
     lower_path = file_path.lower()
+    if "browser" in lower_path:
+        return parse_format_chatgpt_browser
     if "grok" in lower_path:
         return parse_format_grok
     if "deepseek" in lower_path:
@@ -117,6 +122,7 @@ def _minimal_message_payload(message: dict[str, Any]) -> dict[str, Any]:
         - model: 使用的 AI 模型名称
         - sequence: 消息在对话中的顺序编号
         - timestamp: 消息创建时间戳
+        - parent_message_id: 父消息 id（若存在）
     """
     return {
         "message_id": message.get("message_id"),
@@ -124,6 +130,9 @@ def _minimal_message_payload(message: dict[str, Any]) -> dict[str, Any]:
         "model": message.get("model"),
         "sequence": message.get("sequence"),
         "timestamp": message.get("timestamp"),
+        "parent_message_id": message.get("parent_message_id"),
+        "node_id": message.get("node_id"),
+        "capture_index": message.get("capture_index"),
     }
 
 
@@ -150,24 +159,25 @@ def _build_test_path(path: Path) -> Path:
     return path.with_name(f"{path.stem}-test{path.suffix}")
 
 
-def import_export_file(
-    file_path: str | Path,
+def _import_conversation_batches(
+    conversation_batches: Iterable[tuple[dict[str, Any], list[dict[str, Any]]]],
     *,
+    source_name: str,
+    file_name: str,
+    file_path: str,
+    file_hash: str,
     sqlite_db: DatabaseManager,
     vector_db: VectorManager | None,
     embedder: Any = None,
     skip_embedding: bool = False,
 ) -> dict[str, int]:
-    """导入单个导出文件，并返回本次写入的数据量。"""
-    source_path = Path(file_path)
-    parser = select_parser(str(source_path))
+    """导入标准化对话消息流，并返回本次写入的数据量。"""
     embedder = None if skip_embedding else _get_embedder(embedder)
-    source_name = parser.__name__.replace("parse_format_", "")
     import_id = sqlite_db.create_import_job(
         source=source_name,
-        file_name=source_path.name,
-        file_path=str(source_path.resolve()),
-        file_hash=_hash_file(source_path),
+        file_name=file_name,
+        file_path=file_path,
+        file_hash=file_hash,
         import_config_json=json.dumps(
             {
                 "embedding_model": settings.embedding_model,
@@ -185,7 +195,7 @@ def import_export_file(
 
     try:
         with sqlite_db.transaction() as conn:
-            for conv_meta, messages in parser(str(source_path)):
+            for conv_meta, messages in conversation_batches:
                 for message in messages:
                     content = (message.get("content") or "").strip()
                     if not content:
@@ -196,6 +206,7 @@ def import_export_file(
                         source_type="conversation_message",
                         external_id=str(message["message_id"]),
                         root_document_id=str(conv_meta.get("id") or "") or None,
+                        sequence=message.get("sequence"),
                         title=conv_meta.get("title"),
                         author=message.get("sender_type"),
                         created_at=message.get("timestamp") or conv_meta.get("created_at"),
@@ -206,6 +217,9 @@ def import_export_file(
                         metadata={
                             "model": message.get("model"),
                             "sequence": message.get("sequence"),
+                            "parent_message_id": message.get("parent_message_id"),
+                            "node_id": message.get("node_id"),
+                            "capture_index": message.get("capture_index"),
                             "sub_title": message.get("sub_title"),
                             "conversation": {
                                 "id": conv_meta.get("id"),
@@ -299,6 +313,61 @@ def import_export_file(
         "raw_documents": imported_documents,
         "memory_units": imported_memory_units,
     }
+
+
+def import_export_file(
+    file_path: str | Path,
+    *,
+    sqlite_db: DatabaseManager,
+    vector_db: VectorManager | None,
+    embedder: Any = None,
+    skip_embedding: bool = False,
+) -> dict[str, int]:
+    """导入单个导出文件，并返回本次写入的数据量。"""
+    source_path = Path(file_path)
+    parser = select_parser(str(source_path))
+    source_name = parser.__name__.replace("parse_format_", "")
+    return _import_conversation_batches(
+        parser(str(source_path)),
+        source_name=source_name,
+        file_name=source_path.name,
+        file_path=str(source_path.resolve()),
+        file_hash=_hash_file(source_path),
+        sqlite_db=sqlite_db,
+        vector_db=vector_db,
+        embedder=embedder,
+        skip_embedding=skip_embedding,
+    )
+
+
+def import_chatgpt_browser_payload(
+    payload: dict[str, Any] | list[dict[str, Any]],
+    *,
+    sqlite_db: DatabaseManager,
+    vector_db: VectorManager | None,
+    embedder: Any = None,
+    skip_embedding: bool = False,
+) -> dict[str, int]:
+    """导入浏览器扩展直接发送的 ChatGPT payload。"""
+    serialized_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    payload_hash = hashlib.sha256(serialized_payload.encode("utf-8")).hexdigest()
+
+    if isinstance(payload, list):
+        conversation_id = "batch"
+    else:
+        conversation_id = str(payload.get("conversation_id") or "unknown").strip() or "unknown"
+
+    return _import_conversation_batches(
+        parse_chatgpt_browser_payload(payload),
+        source_name="chatgpt_browser",
+        file_name=f"browser-{conversation_id}.json",
+        file_path=f"browser://chatgpt/{conversation_id}",
+        file_hash=payload_hash,
+        sqlite_db=sqlite_db,
+        vector_db=vector_db,
+        embedder=embedder,
+        skip_embedding=skip_embedding,
+    )
 
 
 def build_cli() -> argparse.ArgumentParser:

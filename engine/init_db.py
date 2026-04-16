@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from engine.memory import get_revision_id
@@ -16,6 +17,7 @@ TABLE_SCHEMAS = [
         source_type TEXT NOT NULL,
         external_id TEXT NOT NULL,
         root_document_id TEXT,
+        sequence INTEGER,
         title TEXT,
         author TEXT,
         created_at TEXT,
@@ -105,6 +107,7 @@ TABLE_SCHEMAS = [
 INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_raw_documents_source_external_id ON raw_documents(source, external_id);",
     "CREATE INDEX IF NOT EXISTS idx_raw_documents_root_document_id ON raw_documents(root_document_id);",
+    "CREATE INDEX IF NOT EXISTS idx_raw_documents_root_sequence ON raw_documents(root_document_id, sequence);",
     "CREATE INDEX IF NOT EXISTS idx_raw_documents_latest_revision_id ON raw_documents(latest_revision_id);",
     "CREATE INDEX IF NOT EXISTS idx_raw_documents_is_active ON raw_documents(is_active);",
     "CREATE INDEX IF NOT EXISTS idx_raw_document_revisions_raw_document_id ON raw_document_revisions(raw_document_id);",
@@ -196,6 +199,43 @@ def _backfill_revisions(cursor) -> None:
         )
 
 
+def _coerce_sequence(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _backfill_raw_document_sequence(cursor) -> None:
+    rows = cursor.execute(
+        """
+        SELECT raw_document_id, sequence, metadata_json
+        FROM raw_documents
+        WHERE sequence IS NULL
+        """
+    ).fetchall()
+
+    for row in rows:
+        metadata_json = row["metadata_json"]
+        if not metadata_json:
+            continue
+        try:
+            metadata = json.loads(metadata_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        sequence = _coerce_sequence((metadata or {}).get("sequence"))
+        if sequence is None:
+            continue
+        cursor.execute(
+            """
+            UPDATE raw_documents
+            SET sequence = ?
+            WHERE raw_document_id = ?
+            """,
+            (sequence, row["raw_document_id"]),
+        )
+
+
 def init_database(db_path: str | Path) -> None:
     """Ensure tables, indexes, and lightweight migrations are in place."""
     db_path = Path(db_path)
@@ -206,6 +246,12 @@ def init_database(db_path: str | Path) -> None:
         for sql in TABLE_SCHEMAS:
             cursor.execute(sql)
 
+        _ensure_column(
+            cursor,
+            "raw_documents",
+            "sequence",
+            "ALTER TABLE raw_documents ADD COLUMN sequence INTEGER",
+        )
         _ensure_column(
             cursor,
             "raw_documents",
@@ -238,6 +284,7 @@ def init_database(db_path: str | Path) -> None:
         )
 
         _backfill_revisions(cursor)
+        _backfill_raw_document_sequence(cursor)
 
         for idx_sql in INDEXES:
             cursor.execute(idx_sql)

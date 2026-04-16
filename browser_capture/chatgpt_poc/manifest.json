@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "SelfIndex ChatGPT Capture PoC",
+  "version": "0.1.0",
+  "description": "Capture the visible ChatGPT conversation into normalized JSON for SelfIndex.",
+  "permissions": [
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_title": "SelfIndex Capture",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
