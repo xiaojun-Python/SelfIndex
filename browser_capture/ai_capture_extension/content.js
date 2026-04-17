@@ -6,6 +6,17 @@ function normalizeWhitespace(value) {
     .trim();
 }
 
+function detectProvider() {
+  const hostname = String(window.location.hostname || "").toLowerCase();
+  if (hostname === "chatgpt.com" || hostname === "chat.openai.com") {
+    return "chatgpt";
+  }
+  if (hostname === "grok.com") {
+    return "grok";
+  }
+  return null;
+}
+
 function contentHash(text) {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -20,9 +31,21 @@ function extractConversationId() {
   return match ? match[1] : null;
 }
 
+function extractCanonicalConversationId() {
+  const canonical = document.querySelector("link[rel='canonical']");
+  const href = String(canonical?.getAttribute("href") || "").trim();
+  const match = href.match(/\/c\/([^/?#]+)/);
+  return match ? match[1] : null;
+}
+
 function extractConversationTitle() {
   const title = normalizeWhitespace(document.title || "");
   return title.replace(/\s*-\s*ChatGPT\s*$/i, "").trim() || null;
+}
+
+function extractGrokConversationTitle() {
+  const title = normalizeWhitespace(document.title || "");
+  return title.replace(/\s*-\s*Grok\s*$/i, "").trim() || null;
 }
 
 function removeNoiseNodes(container) {
@@ -644,17 +667,128 @@ function captureVisibleConversation() {
   };
 }
 
+function extractGrokConversationId() {
+  return extractConversationId() || extractCanonicalConversationId();
+}
+
+function grokMessageContainers() {
+  return Array.from(document.querySelectorAll("div[id^='response-']")).filter((node) => {
+    if (!(node instanceof HTMLElement)) {
+      return false;
+    }
+    return Boolean(node.querySelector(".response-content-markdown.markdown"));
+  });
+}
+
+function grokRoleFromNode(messageNode) {
+  const className = String(messageNode.getAttribute("class") || "");
+  if (/\bitems-end\b/.test(className)) {
+    return "user";
+  }
+  if (/\bitems-start\b/.test(className)) {
+    return "assistant";
+  }
+  return null;
+}
+
+function grokMessageId(messageNode) {
+  const rawId = String(messageNode.getAttribute("id") || "").trim();
+  if (!rawId) {
+    return null;
+  }
+  return rawId.replace(/^response-/, "") || rawId;
+}
+
+function buildGrokMessageRecord(messageNode, captureIndex, conversationId, conversationTitle) {
+  const messageId = grokMessageId(messageNode);
+  const role = grokRoleFromNode(messageNode);
+  const content = extractMessageContentArtifacts(messageNode).content;
+
+  if (!messageId || !role || !content) {
+    return null;
+  }
+
+  return {
+    platform: "grok",
+    source_label: "browser",
+    conversation_id: conversationId,
+    conversation_title: conversationTitle,
+    message_id: messageId,
+    parent_message_id: null,
+    role,
+    model: null,
+    model_slug: null,
+    content,
+    content_hash: contentHash(content),
+    timestamp: null,
+    sequence: null,
+    capture_index: captureIndex,
+    dom_turn_testid: null,
+    dom_turn_id: messageNode.getAttribute("id"),
+    page_url: window.location.href
+  };
+}
+
+function captureVisibleGrokConversation() {
+  const conversationId = extractGrokConversationId();
+  const conversationTitle = extractGrokConversationTitle();
+  const messageNodes = grokMessageContainers();
+  const messages = [];
+  const duplicates = [];
+  const seenMessageIds = new Set();
+
+  messageNodes.forEach((messageNode, index) => {
+    const record = buildGrokMessageRecord(messageNode, index, conversationId, conversationTitle);
+    if (!record) {
+      return;
+    }
+    if (seenMessageIds.has(record.message_id)) {
+      duplicates.push(record.message_id);
+      return;
+    }
+    seenMessageIds.add(record.message_id);
+    messages.push(record);
+  });
+
+  return {
+    platform: "grok",
+    source_label: "browser",
+    page_url: window.location.href,
+    conversation_id: conversationId,
+    conversation_title: conversationTitle,
+    captured_at: new Date().toISOString(),
+    message_count: messages.length,
+    duplicates,
+    order_strategy: "capture_index",
+    messages
+  };
+}
+
+function captureActiveConversation() {
+  const provider = detectProvider();
+  if (provider === "chatgpt") {
+    return captureVisibleConversation();
+  }
+  if (provider === "grok") {
+    return captureVisibleGrokConversation();
+  }
+  throw new Error("当前页面还不在已支持的 AI 平台列表里。");
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== "SELFINDEX_CAPTURE_CHATGPT") {
+  if (
+    !message ||
+    !["SELFINDEX_CAPTURE_CHATGPT", "SELFINDEX_CAPTURE_CONVERSATION"].includes(message.type)
+  ) {
     return;
   }
 
   try {
-    const payload = captureVisibleConversation();
+    const payload = captureActiveConversation();
     if (!payload.conversation_id) {
       sendResponse({
         ok: false,
-        error: "当前页面没有识别出 conversation_id。请确认你在具体的 ChatGPT 对话页。"
+        error: "当前页面没有识别出 conversation_id。请确认你在具体的 AI 对话页。"
       });
       return;
     }
@@ -668,3 +802,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 window.SELFINDEX_CAPTURE_CHATGPT = captureVisibleConversation;
+window.SELFINDEX_CAPTURE_GROK = captureVisibleGrokConversation;
+window.SELFINDEX_CAPTURE_CONVERSATION = captureActiveConversation;

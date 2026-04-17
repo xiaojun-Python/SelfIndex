@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import atexit
 import ctypes
+import os
 import subprocess
 import sys
 import tkinter as tk
@@ -11,6 +13,40 @@ from app.core.settings import settings
 from desktop.controller import DesktopController
 from desktop.gui import BackendWindow
 from desktop.tray import TrayIcon
+
+ERROR_ALREADY_EXISTS = 183
+RUNTIME_MUTEX_NAME = "Local\\SelfIndexDesktopRuntime"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = PROJECT_ROOT / "data"
+PID_FILE = DATA_DIR / "selfindex-service.pid"
+
+
+def _show_already_running_message() -> None:
+    try:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "SelfIndex 已经在运行。",
+            "SelfIndex",
+            0x00000040,
+        )
+    except Exception:
+        pass
+
+
+def _write_runtime_pid() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()), encoding="ascii")
+
+
+def _remove_runtime_pid_if_owned() -> None:
+    try:
+        if not PID_FILE.exists():
+            return
+        current_pid_text = PID_FILE.read_text(encoding="ascii").strip()
+        if current_pid_text == str(os.getpid()):
+            PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 class DesktopRuntime:
@@ -34,6 +70,7 @@ class DesktopRuntime:
         )
 
     def run(self) -> None:
+        _write_runtime_pid()
         self.controller.start_service()
         self.tray.start()
         self.root.after(150, self._drain_logs)
@@ -50,10 +87,11 @@ class DesktopRuntime:
         self.root.destroy()
 
     def restart_program(self) -> None:
+        self.controller.stop_service()
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.Popen(
             [sys.executable, "-m", "desktop.main"],
-            cwd=Path(__file__).resolve().parents[1],
+            cwd=PROJECT_ROOT,
             creationflags=creationflags,
         )
         self.quit()
@@ -101,6 +139,15 @@ class DesktopRuntime:
 
 
 def main() -> None:
+    kernel32 = ctypes.windll.kernel32
+    mutex = kernel32.CreateMutexW(None, False, RUNTIME_MUTEX_NAME)
+    if not mutex:
+        raise RuntimeError("Failed to create desktop runtime mutex.")
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        _show_already_running_message()
+        return
+
+    atexit.register(_remove_runtime_pid_if_owned)
     runtime = DesktopRuntime()
     runtime.run()
 

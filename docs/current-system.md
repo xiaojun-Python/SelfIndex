@@ -1,104 +1,122 @@
-# 当前系统说明
+# Current System
 
-这份文档回答一个问题：
+This document answers a simple question:
 
-SelfIndex 现在已经是什么，不再是什么。
+What SelfIndex already is, and what it is not yet.
 
-## 当前阶段定义
+## Current Definition
 
-SelfIndex 现在已经不再是“旧聊天记录检索工具的重命名版”。
+SelfIndex is no longer just a renamed chat log search tool.
 
-它当前已经是一个具备以下边界的个人记忆系统原型：
+At this stage, it is a personal memory system prototype with these active boundaries:
 
-- Archive：保存原始资料与当前状态
-- Revision History：保存可变来源的历史版本
-- Memory：从当前 revision 派生记忆单元
-- Retrieval：向量检索 + 回溯
-- Protection：受保护召回域与解锁式查询
+- Archive: preserve raw source material and current document state
+- Revision history: keep snapshots for changing sources
+- Memory: derive retrieval-friendly memory units from the current revision
+- Retrieval: vector search with trace-back into source documents
+- Protection: protected recall domains with explicit unlock-style queries
 
-## 关键数据流
+## Core Data Flow
 
-### 导入时
-
-```text
-数据源
--> 标准化为 raw_document
--> upsert 当前 raw_document
--> 如内容变化则生成新的 raw_document_revision
--> 从当前 revision 构建 memory_units
--> 可选写入 Chroma 向量
-```
-
-### 检索时
+### On import
 
 ```text
-查询
--> 查询向量
--> Chroma 返回候选 memory_units
--> SQLite 批量取回 detail
--> 过滤 recall_domain / inactive document
--> 返回结果与回溯信息
+source data
+-> normalize into raw_document
+-> upsert current raw_document
+-> create or update raw_document_revision when content changes
+-> build memory_units from the current revision
+-> optionally write vectors into Chroma
 ```
 
-### Markdown 同步时
+### On retrieval
 
 ```text
-扫描目录
--> 忽略规则过滤
--> relative path 作为 external_id
--> 内容 hash 判断新增 / 跳过 / 更新
--> 丢失文件标记为 inactive + 追加 deleted revision
+query
+-> embed query
+-> Chroma returns candidate memory_units
+-> SQLite loads detail rows in batch
+-> filter by recall_domain and active state
+-> return result plus trace-back payload
 ```
 
-## 当前已经成立的设计原则
+### On Markdown sync
 
-### 1. 当前态与历史态分离
+```text
+scan directory
+-> apply ignore rules
+-> use relative path as external_id
+-> detect create / skip / update by content hash
+-> mark missing files as inactive and append a deleted revision
+```
 
-- `raw_documents` 保存当前态
-- `raw_document_revisions` 保存历史
+### On browser capture
 
-这意味着 markdown、笔记文件、可变对话记录以后都能沿同一条线处理。
+```text
+AI web page
+-> capture visible conversation snapshot
+-> normalize messages into browser payload
+-> import into raw_documents / memory_units
+-> optionally merge sequence with existing conversation anchors
+```
 
-### 2. 记忆单元绑定 revision
+## Design Principles Already In Place
 
-`memory_units` 不只是挂在 `raw_document_id` 上，而是挂到 `revision_id`。
+### 1. Current state and history are separated
 
-这意味着：
+- `raw_documents` stores the current state
+- `raw_document_revisions` stores history
 
-- 记忆知道自己来自哪个版本
-- 文档更新后可以重建新的记忆单元
-- 历史内容不需要覆盖掉
+This allows Markdown notes, exported conversations, and browser-captured conversations to share one storage model.
 
-### 3. 受保护规则与受保护结果分离
+### 2. Memory units are revision-bound
 
-- `protected_terms`：规则
-- `memory_units.recall_domain`：结果
+`memory_units` are attached to `revision_id`, not just `raw_document_id`.
 
-这样查询阶段不需要实时重判整库。
+That means:
 
-### 4. inactive 不等于删除
+- memory can be traced to a specific version
+- updated documents can generate new memory units
+- old versions do not need to be overwritten
 
-对于 markdown 同步这类可变来源：
+### 3. Protected rules and protected results are separated
 
-- 文件消失时不物理删除历史
-- 当前态标记 `is_active = 0`
-- 检索默认忽略
-- 历史仍保留
+- `protected_terms` stores rules
+- `memory_units.recall_domain` stores the resulting label
 
-这和 SelfIndex 的“允许遗忘发生，而不是强制删除”一致。
+This keeps retrieval fast because the whole database does not need to be re-judged at query time.
 
-## 当前还没有完成的部分
+### 4. Inactive is not deletion
 
-- Web 编辑 / 添加页面仍未完全收口
-- 没有历史版本浏览 UI
-- summary workflow 还没有正式独立出来
-- 托盘 / 常驻后台还没开始做
-- markdown 同步目前还是“脚本触发”，不是 watcher
+For mutable sources such as Markdown sync:
 
-## 当前最值得继续做的方向
+- missing files are not physically removed from history
+- current state is marked with `is_active = 0`
+- default retrieval ignores inactive items
+- historical revisions remain available
 
-1. Memory summary workflow
-2. 更多数据源导入器
-3. 设置页 / 任务状态
-4. 历史版本浏览
+## What Is Already Working
 
+- revision-aware storage for imported and synced content
+- independent embedding workflow
+- Markdown directory sync with ignore rules and delete detection
+- ChatGPT export import
+- ChatGPT browser sync
+- Grok browser sync with lazy-load merge behavior
+- protected recall domains
+- SQLite / SQLCipher storage
+
+## What Is Still Incomplete
+
+- no polished revision browser UI yet
+- no finished conversation replay UI yet
+- browser capture still depends on site-specific DOM structure
+- browser support is still early and provider-specific
+- the desktop runtime is still Windows-first
+
+## Best Next Directions
+
+1. tighten documentation and onboarding
+2. improve replay and inspection tools for full conversations
+3. add more browser/platform adapters
+4. keep reducing startup and runtime ambiguity

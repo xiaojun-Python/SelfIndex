@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "SelfIndex ChatGPT Capture PoC",
+  "name": "SelfIndex AI Capture",
   "version": "0.1.0",
-  "description": "Capture the visible ChatGPT conversation into normalized JSON for SelfIndex.",
+  "description": "Capture visible AI web conversations into normalized JSON for SelfIndex.",
   "permissions": [
     "tabs",
     "storage"
@@ -10,6 +10,7 @@
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://grok.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
@@ -21,7 +22,8 @@
     {
       "matches": [
         "https://chatgpt.com/*",
-        "https://chat.openai.com/*"
+        "https://chat.openai.com/*",
+        "https://grok.com/*"
       ],
       "js": [
         "content.js"

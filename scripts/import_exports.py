@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections import Counter
 from decimal import Decimal
 from pathlib import Path
 from typing import Iterable
@@ -31,8 +32,8 @@ from typing import Any
 from app.core.settings import settings
 from engine.database import DatabaseManager, VectorManager
 from engine.memory import build_memory_units, build_raw_document
-from scripts.parsers.chatgpt_browser_parser import parse_chatgpt_browser_payload
-from scripts.parsers.chatgpt_browser_parser import parse_format_chatgpt_browser
+from scripts.parsers.browser_capture_parser import parse_browser_capture_payload
+from scripts.parsers.browser_capture_parser import parse_format_browser_capture
 from scripts.parsers.chatgpt_parser import parse_format_openai
 from scripts.parsers.deepseek_parser import parse_format_deepseek
 from scripts.parsers.grok_parser import parse_format_grok
@@ -55,7 +56,7 @@ def select_parser(file_path: str):
     """
     lower_path = file_path.lower()
     if "browser" in lower_path:
-        return parse_format_chatgpt_browser
+        return parse_format_browser_capture
     if "grok" in lower_path:
         return parse_format_grok
     if "deepseek" in lower_path:
@@ -154,6 +155,103 @@ def _hash_file(file_path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _sync_sequence_into_json_blob(blob_text: str | None, *, sequence: int, target: str) -> str | None:
+    if not blob_text:
+        return blob_text
+    try:
+        payload = json.loads(blob_text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return blob_text
+
+    if target == "metadata":
+        if isinstance(payload, dict):
+            payload["sequence"] = sequence
+    elif target == "raw_payload":
+        if isinstance(payload, dict):
+            message = payload.get("message")
+            if isinstance(message, dict):
+                message["sequence"] = sequence
+
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_browser_sequence_merge_updates(
+    *,
+    snapshot_messages: list[dict[str, Any]],
+    previous_sequence_by_external_id: dict[str, int],
+    current_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    snapshot_ids = [
+        str(message.get("message_id") or "").strip()
+        for message in snapshot_messages
+        if str(message.get("message_id") or "").strip()
+    ]
+    if not snapshot_ids:
+        return {"mode": "empty", "anchor_count": 0, "updates": []}
+
+    offsets: list[int] = []
+    snapshot_index_by_id: dict[str, int] = {}
+    for index, message_id in enumerate(snapshot_ids):
+        snapshot_index_by_id[message_id] = index
+        previous_sequence = previous_sequence_by_external_id.get(message_id)
+        if previous_sequence is None:
+            continue
+        offsets.append(int(previous_sequence) - index)
+
+    if not offsets:
+        return {"mode": "no_anchor", "anchor_count": 0, "updates": []}
+
+    offset = Counter(offsets).most_common(1)[0][0]
+    proposed_sequence_by_id = {
+        message_id: index + offset for index, message_id in enumerate(snapshot_ids)
+    }
+
+    sortable_rows: list[tuple[int, int, int, str, dict[str, Any]]] = []
+    for row in current_rows:
+        row_sequence = row.get("sequence")
+        proposed_sequence = proposed_sequence_by_id.get(row["external_id"], row_sequence)
+        sortable_rows.append(
+            (
+                int(proposed_sequence) if proposed_sequence is not None else 10**12,
+                snapshot_index_by_id.get(row["external_id"], 10**12),
+                int(row_sequence) if row_sequence is not None else 10**12,
+                row["external_id"],
+                row,
+            )
+        )
+
+    sortable_rows.sort(key=lambda item: item[:4])
+
+    updates: list[dict[str, Any]] = []
+    for normalized_sequence, (_assigned, _snapshot_index, _current_sequence, _external_id, row) in enumerate(sortable_rows):
+        if row.get("sequence") == normalized_sequence:
+            continue
+        updates.append(
+            {
+                "raw_document_id": row["raw_document_id"],
+                "latest_revision_id": row.get("latest_revision_id"),
+                "sequence": normalized_sequence,
+                "metadata_json": _sync_sequence_into_json_blob(
+                    row.get("metadata_json"),
+                    sequence=normalized_sequence,
+                    target="metadata",
+                ),
+                "raw_payload": _sync_sequence_into_json_blob(
+                    row.get("raw_payload"),
+                    sequence=normalized_sequence,
+                    target="raw_payload",
+                ),
+            }
+        )
+
+    return {
+        "mode": "anchored_merge",
+        "anchor_count": len(offsets),
+        "offset": offset,
+        "updates": updates,
+    }
+
+
 def _build_test_path(path: Path) -> Path:
     """Return a sibling test path like ``name-test.ext``."""
     return path.with_name(f"{path.stem}-test{path.suffix}")
@@ -191,11 +289,27 @@ def _import_conversation_batches(
 
     imported_documents = 0
     imported_memory_units = 0
+    resequenced_documents = 0
     protected_rules = sqlite_db.list_protected_terms()
 
     try:
         with sqlite_db.transaction() as conn:
             for conv_meta, messages in conversation_batches:
+                browser_payload = bool((conv_meta.get("raw_meta") or {}).get("source_label") == "browser")
+                existing_sequence_by_external_id: dict[str, int] = {}
+                if browser_payload and conv_meta.get("id"):
+                    previous_rows = sqlite_db.list_conversation_raw_documents(
+                        source=str(conv_meta.get("source") or "unknown"),
+                        source_type="conversation_message",
+                        root_document_id=str(conv_meta.get("id")),
+                        conn=conn,
+                    )
+                    existing_sequence_by_external_id = {
+                        str(row["external_id"]): int(row["sequence"])
+                        for row in previous_rows
+                        if row.get("sequence") is not None
+                    }
+
                 for message in messages:
                     content = (message.get("content") or "").strip()
                     if not content:
@@ -291,6 +405,23 @@ def _import_conversation_batches(
 
                     imported_documents += 1
                     imported_memory_units += len(memory_units)
+
+                if browser_payload and conv_meta.get("id"):
+                    current_rows = sqlite_db.list_conversation_raw_documents(
+                        source=str(conv_meta.get("source") or "unknown"),
+                        source_type="conversation_message",
+                        root_document_id=str(conv_meta.get("id")),
+                        conn=conn,
+                    )
+                    merge_result = _build_browser_sequence_merge_updates(
+                        snapshot_messages=messages,
+                        previous_sequence_by_external_id=existing_sequence_by_external_id,
+                        current_rows=current_rows,
+                    )
+                    updates = merge_result.get("updates") or []
+                    if updates:
+                        sqlite_db.update_raw_document_sequence_fields(updates, conn=conn)
+                        resequenced_documents += len(updates)
     except Exception as exc:
         sqlite_db.finish_import_job(
             import_id,
@@ -312,6 +443,7 @@ def _import_conversation_batches(
         "import_id": import_id,
         "raw_documents": imported_documents,
         "memory_units": imported_memory_units,
+        "resequenced_documents": resequenced_documents,
     }
 
 
@@ -340,7 +472,7 @@ def import_export_file(
     )
 
 
-def import_chatgpt_browser_payload(
+def import_browser_capture_payload(
     payload: dict[str, Any] | list[dict[str, Any]],
     *,
     sqlite_db: DatabaseManager,
@@ -348,26 +480,32 @@ def import_chatgpt_browser_payload(
     embedder: Any = None,
     skip_embedding: bool = False,
 ) -> dict[str, int]:
-    """导入浏览器扩展直接发送的 ChatGPT payload。"""
+    """导入浏览器扩展直接发送的浏览器对话 payload。"""
     serialized_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     payload_hash = hashlib.sha256(serialized_payload.encode("utf-8")).hexdigest()
 
     if isinstance(payload, list):
         conversation_id = "batch"
+        platform = "browser"
     else:
         conversation_id = str(payload.get("conversation_id") or "unknown").strip() or "unknown"
+        platform = str(payload.get("platform") or "browser").strip().lower() or "browser"
 
     return _import_conversation_batches(
-        parse_chatgpt_browser_payload(payload),
-        source_name="chatgpt_browser",
-        file_name=f"browser-{conversation_id}.json",
-        file_path=f"browser://chatgpt/{conversation_id}",
+        parse_browser_capture_payload(payload),
+        source_name=f"{platform}_browser",
+        file_name=f"browser-{platform}-{conversation_id}.json",
+        file_path=f"browser://{platform}/{conversation_id}",
         file_hash=payload_hash,
         sqlite_db=sqlite_db,
         vector_db=vector_db,
         embedder=embedder,
         skip_embedding=skip_embedding,
     )
+
+
+# Backward-compatible alias for older route and caller names.
+import_chatgpt_browser_payload = import_browser_capture_payload
 
 
 def build_cli() -> argparse.ArgumentParser:

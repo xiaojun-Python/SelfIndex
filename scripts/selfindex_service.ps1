@@ -4,7 +4,8 @@ param(
     [string]$Action = "status",
 
     [string]$HostAddress = "127.0.0.1",
-    [int]$Port = 5000
+    [int]$Port = 5000,
+    [switch]$NoTray
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PythonExe = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $DataDir = Join-Path $ProjectRoot "data"
 $PidFile = Join-Path $DataDir "selfindex-service.pid"
+$ModeFile = Join-Path $DataDir "selfindex-service.mode"
 $StdOutLogFile = Join-Path $DataDir "selfindex-service.out.log"
 $StdErrLogFile = Join-Path $DataDir "selfindex-service.err.log"
 
@@ -59,6 +61,16 @@ function Remove-StalePidFile {
     if (Test-Path $PidFile) {
         Remove-Item -LiteralPath $PidFile -Force
     }
+    if (Test-Path $ModeFile) {
+        Remove-Item -LiteralPath $ModeFile -Force
+    }
+}
+
+function Get-ManagedMode {
+    if (-not (Test-Path $ModeFile)) {
+        return $null
+    }
+    return (Get-Content $ModeFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
 }
 
 function Stop-SelfIndexProcess {
@@ -133,9 +145,17 @@ function Start-SelfIndexProcess {
     $env:HOST = $HostAddress
     $env:PORT = [string]$Port
 
+    if ($NoTray) {
+        $moduleName = "app.main"
+        $mode = "service"
+    } else {
+        $moduleName = "desktop.main"
+        $mode = "desktop"
+    }
+
     $process = Start-Process `
         -FilePath $PythonExe `
-        -ArgumentList "-m app.main" `
+        -ArgumentList "-m $moduleName" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru `
@@ -143,10 +163,16 @@ function Start-SelfIndexProcess {
         -RedirectStandardError $StdErrLogFile
 
     Set-Content -LiteralPath $PidFile -Value $process.Id -Encoding ascii
+    Set-Content -LiteralPath $ModeFile -Value $mode -Encoding ascii
 
     Write-Host "SelfIndex started on PID $($process.Id)."
+    if ($mode -eq "desktop") {
+        Write-Host "Desktop tray runtime started."
+    } else {
+        Write-Host "Service-only runtime started."
+    }
     Write-Host "Web: http://$HostAddress`:$Port/"
-    Write-Host "Ingest: http://$HostAddress`:$Port/api/ingest/chatgpt-browser"
+    Write-Host "Ingest: http://$HostAddress`:$Port/api/ingest/browser-conversation"
     Write-Host "Stdout log: $StdOutLogFile"
     Write-Host "Stderr log: $StdErrLogFile"
 }
@@ -154,10 +180,14 @@ function Start-SelfIndexProcess {
 function Show-Status {
     $process = Get-RunningProcessByPidFile
     $listeners = Get-ListeningPidsByPort
+    $mode = Get-ManagedMode
 
     if ($process) {
         Write-Host "Managed SelfIndex is running."
         Write-Host "PID: $($process.Id)"
+        if ($mode) {
+            Write-Host "Mode: $mode"
+        }
     } else {
         Write-Host "Managed SelfIndex is not running."
     }
@@ -169,7 +199,7 @@ function Show-Status {
     }
 
     Write-Host "Expected web URL: http://$HostAddress`:$Port/"
-    Write-Host "Expected ingest URL: http://$HostAddress`:$Port/api/ingest/chatgpt-browser"
+    Write-Host "Expected ingest URL: http://$HostAddress`:$Port/api/ingest/browser-conversation"
     if (Test-Path $StdOutLogFile) {
         Write-Host "Stdout log: $StdOutLogFile"
     }

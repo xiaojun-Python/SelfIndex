@@ -1,103 +1,106 @@
-# 架构说明
+# Architecture
 
-## 系统目标
+## Goal
 
-SelfIndex 的当前目标是：
+The current goal of SelfIndex is:
 
-- 尽量完整保存个人资料
-- 用轻量可维护的方式建立可检索记忆
-- 支持后续逐步增强，而不是一次性做成复杂平台
+- preserve personal source material as faithfully as practical
+- build a lightweight but durable searchable memory layer
+- support changing sources without losing historical state
+- stay local-first and maintainable
 
-## 三层结构
+## Three Layers
 
 ### 1. Archive Layer
 
-职责：
+Responsibilities:
 
-- 保存原始资料
-- 保存当前文档状态
-- 保存历史版本
-- 处理新增 / 重复 / 更新 / 删除
+- store raw source material
+- store the current document state
+- store revision history
+- handle create, duplicate, update, and inactive transitions
 
-当前落地：
+Current implementation:
 
 - `raw_documents`
 - `raw_document_revisions`
 
 ### 2. Memory Layer
 
-职责：
+Responsibilities:
 
-- 从当前 revision 派生记忆单元
-- 保存 `content` 与 `summary`
-- 保存 `recall_domain`
-- 为 embedding workflow 提供稳定输入
+- derive retrieval-friendly units from the current revision
+- store chunk content and summary
+- store recall-domain labels
+- provide stable input for embedding workflows
 
-当前落地：
+Current implementation:
 
 - `memory_units`
-- `Chroma collection`
+- `Chroma` collection
 
 ### 3. Recall Layer
 
-职责：
+Responsibilities:
 
-- 查询解析
-- 向量召回
-- 召回域过滤
-- inactive 文档过滤
-- 回溯到原始文档
+- parse queries
+- retrieve by vector similarity
+- filter by recall domain
+- ignore inactive source documents by default
+- trace hits back to raw documents
 
-当前落地：
+Current implementation:
 
 - `engine/query_syntax.py`
 - `engine/retriever.py`
 - `/api/memory/search`
 
-## 设计选择
+## Why Revisions Exist
 
-### 为什么要引入 revisions
+SelfIndex is not a one-time import tool anymore.
 
-因为 SelfIndex 现在已经不是一次性导入工具，而要支持：
+It already needs to support:
 
-- markdown 笔记反复修改
-- 对话记录增量变化
-- 未来更多会变化的数据源
+- Markdown notes that change over time
+- exported conversations
+- browser-captured conversations that may grow incrementally
+- lazy-loaded sources that become more complete across multiple syncs
 
-如果没有 revisions，当前态一更新，旧内容就会被覆盖掉。
+Without revisions, a later import would simply overwrite the earlier state.
 
-### 为什么 memory_units 仍然保留
+## Why Memory Units Still Matter
 
-因为它不是 archive，而是“记忆表示层”。
+`memory_units` are not the archive.
 
-它负责：
+They are the memory representation layer, responsible for:
 
-- 搜索友好的切块
-- 摘要
-- 召回域
-- embedding 状态
+- search-friendly chunking
+- summary storage
+- recall-domain labeling
+- embedding state
 
-### 为什么 protected_terms 独立成表
+The archive preserves source truth. The memory layer preserves retrieval usefulness.
 
-因为 `.env` 只适合作配置，不适合作长期保存敏感规则。
+## Why Browser Capture Fits This Architecture
 
-所以现在：
+Browser capture is not a separate storage model.
 
-- 规则存数据库
-- 结果存 `memory_units.recall_domain`
-- `.env` 只作为种子来源
+It is another ingestion path that still ends up in the same archive and memory structure:
 
-## 当前技术边界
+- source page -> normalized browser payload
+- browser payload -> `raw_documents`
+- `raw_documents` -> `raw_document_revisions`
+- current revision -> `memory_units`
 
-- SQLite / SQLCipher：结构化主存储
-- Chroma：向量索引
-- Flask：Web 层
-- Python 脚本：导入、回填、同步、后台工作流雏形
+For lazy-loaded sources such as Grok, SelfIndex now supports a merge step that uses overlapping message ids as anchors and reorders `sequence` without rewriting content or embeddings.
 
-## 当前刻意不做的事
+## Deliberate Non-Goals
 
-- 不做复杂图谱关系系统
-- 不做多用户平台抽象
-- 不做“人格化代理”产品层
-- 不做 watcher 优先于同步协议
+At this stage, SelfIndex is intentionally not trying to become:
 
+- a knowledge graph platform
+- a multi-user SaaS system
+- a personality-driven agent product
+- a full browser automation system
+
+The project is still optimizing for a local-first memory pipeline rather than a broad product layer.

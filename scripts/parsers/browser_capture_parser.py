@@ -1,4 +1,4 @@
-"""ChatGPT 浏览器捕获 JSON 导入解析器。"""
+"""浏览器捕获 JSON 导入解析器。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,15 @@ from typing import Any
 
 from scripts.format_timestamp import format_timestamp
 from scripts.parsers.chatgpt_parser import _normalize_role
+
+
+def _platform_source_name(platform: Any) -> str:
+    normalized = str(platform or "").strip().lower()
+    if normalized == "grok":
+        return "Grok"
+    if normalized == "deepseek":
+        return "DeepSeek"
+    return "ChatGPT"
 
 
 def _normalize_capture_index(value: Any, fallback: int) -> int:
@@ -72,8 +81,8 @@ def _ordered_browser_messages(raw_messages: list[dict[str, Any]]) -> list[dict[s
     return ordered_messages
 
 
-def parse_chatgpt_browser_payload(payload: Any):
-    """解析内存中的 ChatGPT 浏览器捕获 payload。"""
+def parse_browser_capture_payload(payload: Any):
+    """解析内存中的浏览器捕获 payload。"""
     if isinstance(payload, list):
         conversation_payloads = payload
     else:
@@ -81,11 +90,13 @@ def parse_chatgpt_browser_payload(payload: Any):
 
     for obj in conversation_payloads:
         conversation_id = str(obj.get("conversation_id") or obj.get("id") or "").strip()
+        platform = str(obj.get("platform") or "chatgpt").strip().lower() or "chatgpt"
         conv_meta = {
             "id": conversation_id,
             "title": str(obj.get("conversation_title") or obj.get("title") or "Untitled conversation"),
             "created_at": format_timestamp(obj.get("captured_at") or obj.get("created_at")),
-            "source": "ChatGPT",
+            "source": _platform_source_name(platform),
+            "platform": platform,
             "raw_meta": obj,
         }
 
@@ -93,9 +104,14 @@ def parse_chatgpt_browser_payload(payload: Any):
         yield conv_meta, _ordered_browser_messages(raw_messages)
 
 
-def parse_format_chatgpt_browser(file_path: str):
-    """解析 ChatGPT 浏览器扩展导出的标准化 JSON。"""
+def parse_format_browser_capture(file_path: str):
+    """解析浏览器扩展导出的标准化 JSON。"""
     with open(file_path, encoding="utf-8") as file_obj:
         payload = json.load(file_obj)
 
-    yield from parse_chatgpt_browser_payload(payload)
+    yield from parse_browser_capture_payload(payload)
+
+
+# Backward-compatible aliases for older imports.
+parse_chatgpt_browser_payload = parse_browser_capture_payload
+parse_format_chatgpt_browser = parse_format_browser_capture

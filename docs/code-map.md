@@ -1,57 +1,102 @@
-# 代码地图
+# Code Map
 
-这份文档回答：
+This document answers a practical question:
 
-“如果我要读当前项目，先看哪些文件最值。”
+If you are new to the repository, which files are worth reading first?
 
-## 入口层
+## Entry Points
 
 ### `app/main.py`
 
-本地运行入口。
+Minimal local web entry point.
 
 ### `app/__init__.py`
 
-应用工厂。负责：
+Application factory.
 
-- 读取 settings
-- 初始化 SQLite / SQLCipher
-- 初始化 Chroma
-- 注册 Flask 路由
+It wires together:
 
-## Web 层
+- settings
+- SQLite / SQLCipher
+- Chroma
+- Flask routes
+
+### `scripts/selfindex_service.ps1`
+
+Recommended local start entry.
+
+It manages:
+
+- unified startup
+- shutdown
+- restart
+- status checks
+
+By default it starts the desktop runtime and tray, which then starts the local web service.
+
+## Web Layer
 
 ### `app/api/routes.py`
 
-当前最核心的 Web 路由文件。
+Main Flask route file.
 
-包括：
+It contains:
 
-- 搜索
-- 查看详情
-- 编辑保存
-- JSON memory API
+- search routes
+- detail view routes
+- edit / update routes
+- minimal JSON memory API
+- browser ingestion endpoint
 
-## 配置层
+## Desktop Runtime
+
+### `desktop/main.py`
+
+Desktop runtime entry point.
+
+It sets up:
+
+- system tray
+- backend control window
+- single-instance guard
+- unified runtime pid handoff
+
+### `desktop/controller.py`
+
+Controls the local service process and helper commands.
+
+Important for:
+
+- starting and stopping the web service
+- restart behavior
+- attaching to an already-running listener
+- runtime log streaming
+
+### `desktop/tray.py`
+
+Native Windows tray icon and popup menu.
+
+## Settings
 
 ### `app/core/settings.py`
 
-集中读取 `.env` 与默认配置。
+Central `.env` and default configuration loader.
 
-重点看：
+Important values include:
 
-- 数据库路径
-- Chroma 路径
-- embedding 配置
-- 解锁前缀
+- database paths
+- Chroma path
+- embedding configuration
+- unlock prefixes
+- host and port
 
-## 引擎层
+## Engine Layer
 
 ### `engine/init_db.py`
 
-当前 schema 与轻量迁移入口。
+Schema initialization and lightweight migrations.
 
-重点：
+Important tables:
 
 - `raw_documents`
 - `raw_document_revisions`
@@ -61,89 +106,108 @@
 
 ### `engine/database.py`
 
-当前最关键的后端文件之一。
+Core backend persistence layer.
 
-负责：
+Responsibilities:
 
-- SQLite 读写
-- revisions 落盘
-- inactive 标记
-- protected_terms 读写
-- memory detail 批量读取
-- Chroma 访问封装
+- SQLite read/write
+- revision storage
+- sequence updates
+- inactive marking
+- protected term storage
+- memory detail loading
+- Chroma wrapper integration
 
 ### `engine/memory.py`
 
-负责：
-
-- 构建 `raw_document`
-- 构建 `raw_document_revision`
-- 构建 `memory_units`
-- recall_domain 命中范围
+Builds normalized raw documents, revisions, and memory units.
 
 ### `engine/retriever.py`
 
-负责：
+Retrieval assembly layer.
 
-- query 向量化
-- Chroma 搜索
-- recall_domain 过滤
-- inactive 过滤
-- 回溯结构组装
+Responsibilities:
+
+- query embedding
+- Chroma search
+- recall-domain filtering
+- inactive filtering
+- trace-back payload assembly
 
 ### `engine/query_syntax.py`
 
-负责解锁式查询的前缀解析。
+Unlock-prefix parsing for recall-domain aware search.
 
 ### `engine/protected_terms.py`
 
-负责 `protected_terms` 的编码 / 解码辅助。
+Encoding and decoding helpers for protected terms.
 
-## 脚本层
+## Import and Sync Scripts
 
 ### `scripts/import_exports.py`
 
-导入导出文件的正式入口。
+Main import entry for exported conversation files and browser payloads.
 
-### `scripts/build_embeddings.py`
+### `scripts/parsers/chatgpt_parser.py`
 
-单独运行 embedding workflow。
+ChatGPT export parser with sequence reconstruction for exported conversations.
+
+### `scripts/parsers/browser_capture_parser.py`
+
+Parser for browser-captured payloads.
+
+It now supports browser payloads from multiple platforms, including ChatGPT and Grok.
+
+### `scripts/parsers/grok_parser.py`
+
+Parser for Grok export files.
 
 ### `scripts/sync_markdown_directory.py`
 
-同步 markdown 目录，支持：
+Markdown directory sync with:
 
-- 忽略规则
-- 更新检测
-- 删除检测
+- ignore rules
+- update detection
+- inactive detection for missing files
 
-### `scripts/backfill_recall_domains.py`
+### `scripts/build_embeddings.py`
 
-按 `protected_terms` 回填 `memory_units.recall_domain`。
+Run embeddings as a separate workflow.
 
-### `scripts/manage_protected_terms.py`
+## Browser Capture
 
-管理受保护词规则。
+### `browser_capture/ai_capture_extension/manifest.json`
 
-## 测试层
+Chrome extension manifest.
 
-### `tests/test_memory_pipeline.py`
+### `browser_capture/ai_capture_extension/content.js`
 
-覆盖 archive -> memory -> retrieval 主链路。
+DOM capture logic for supported AI sites.
 
-### `tests/test_markdown_sync.py`
+Currently used for:
 
-覆盖 markdown 同步、忽略规则、更新、删除检测。
+- ChatGPT visible conversation capture
+- Grok visible conversation capture
 
-### `tests/test_backfill_recall_domains.py`
+### `browser_capture/ai_capture_extension/popup.js`
 
-覆盖 protected terms、回填、标题命中。
+Popup logic for:
 
-### `tests/test_unlock_query.py`
+- capture
+- semi-automatic sync
+- Grok snapshot merge behavior
+- local endpoint submission
 
-覆盖解锁式查询。
+## Tests
 
-### `tests/test_sqlcipher_migration.py`
+### `tests/test_browser_capture_parser.py`
 
-覆盖 SQLCipher 导出与迁移。
+Covers browser payload parsing and source mapping.
 
+### `tests/test_browser_sequence_merge.py`
+
+Covers anchor-based sequence merge for lazy-loaded browser sources.
+
+### `tests/test_chatgpt_parser_order.py`
+
+Covers ChatGPT export sequence reconstruction.

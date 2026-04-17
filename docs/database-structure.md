@@ -1,39 +1,41 @@
-# 数据库结构
+# Database Structure
 
-当前主数据库是 SQLite / SQLCipher。
+The main database is SQLite or SQLCipher, depending on configuration.
 
-## 当前主表
+## Main Tables
 
-| 表名 | 作用 |
+| Table | Purpose |
 | --- | --- |
-| `raw_documents` | 当前文档状态 |
-| `raw_document_revisions` | 历史版本快照 |
-| `memory_units` | 当前 revision 派生的记忆单元 |
-| `protected_terms` | 受保护规则表 |
-| `import_jobs` | 导入任务记录 |
+| `raw_documents` | current document state |
+| `raw_document_revisions` | historical snapshots |
+| `memory_units` | retrieval-facing chunks derived from the current revision |
+| `protected_terms` | protected recall rules |
+| `import_jobs` | import job history |
 
-## 关系
+## Relationship Model
 
 ```text
 raw_documents (1) ────< raw_document_revisions (N)
 raw_document_revisions (1) ────< memory_units (N)
-import_jobs (独立)
-protected_terms (独立规则表)
+protected_terms (independent rules)
+import_jobs (independent job log)
 ```
 
 ## `raw_documents`
 
-当前态表。
+Current-state table.
 
-关键字段：
+Important fields:
 
 - `raw_document_id`
 - `source`
 - `source_type`
 - `external_id`
 - `root_document_id`
+- `sequence`
 - `title`
 - `author`
+- `created_at`
 - `content`
 - `content_hash`
 - `current_content_hash`
@@ -42,16 +44,18 @@ protected_terms (独立规则表)
 - `raw_payload`
 - `metadata_json`
 
-说明：
+Notes:
 
-- `UNIQUE(source, external_id)`
-- `is_active = 0` 表示文件已被同步器判定为失活
+- `UNIQUE(source, external_id)` is the main identity guard
+- `root_document_id` groups messages that belong to the same conversation
+- `sequence` stores the current linear order within a conversation when applicable
+- `is_active = 0` means the current state should be ignored by default retrieval
 
 ## `raw_document_revisions`
 
-历史版本表。
+Revision history table.
 
-关键字段：
+Important fields:
 
 - `revision_id`
 - `raw_document_id`
@@ -59,25 +63,24 @@ protected_terms (独立规则表)
 - `content_hash`
 - `title`
 - `author`
+- `created_at`
 - `raw_payload`
 - `metadata_json`
 - `change_type`
-  - `created`
-  - `updated`
-  - `deleted`
 - `is_current`
 - `captured_at`
 
-说明：
+Notes:
 
-- 一个 `raw_document` 可以有多个 revisions
-- 当前 revision 由 `is_current = 1` 标记
+- one raw document can have many revisions
+- current revision is marked by `is_current = 1`
+- browser capture sequence-only adjustments currently update the current revision metadata without creating a new content revision
 
 ## `memory_units`
 
-记忆单元表。
+Retrieval-facing chunk table.
 
-关键字段：
+Important fields:
 
 - `memory_unit_id`
 - `revision_id`
@@ -93,16 +96,17 @@ protected_terms (独立规则表)
 - `metadata_json`
 - `is_embedded`
 
-说明：
+Notes:
 
-- 当前主检索只面向 active document 的 current revision
-- `recall_domain` 是最终打标结果，不是规则本身
+- memory units are derived from the current revision
+- retrieval defaults to active documents only
+- `recall_domain` is a stored result label, not the original rule definition
 
 ## `protected_terms`
 
-受保护规则表。
+Protected recall rule table.
 
-关键字段：
+Important fields:
 
 - `term_id`
 - `term_encoded`
@@ -113,17 +117,16 @@ protected_terms (独立规则表)
 - `created_at`
 - `updated_at`
 
-说明：
+Notes:
 
-- 当前 `term_encoded` 使用 `base64`
-- 这是弱混淆，不是强加密
-- 程序读取时会解码后参与匹配
+- terms are currently stored with lightweight encoding, not strong encryption
+- rules are persisted in the database rather than treated as `.env`-only settings
 
 ## `import_jobs`
 
-导入任务记录。
+Import execution history.
 
-关键字段：
+Important fields:
 
 - `import_id`
 - `source`
@@ -140,11 +143,14 @@ protected_terms (独立规则表)
 - `import_config_json`
 - `notes`
 
-## 当前检索默认行为
+## Conversation Ordering Notes
 
-检索默认会排除：
+Conversation-like sources rely on `root_document_id` plus `sequence`.
 
-- `raw_documents.is_active = 0`
-- 不符合解锁域的 `memory_units`
+Current behavior:
 
-这意味着被删除或失活的 markdown 不会继续出现在默认召回里，但历史 revision 仍然存在。
+- ChatGPT exports reconstruct order before import
+- ChatGPT browser sync usually appends new tail messages incrementally
+- Grok browser sync may merge partial lazy-loaded snapshots and then re-align `sequence` using overlapping message ids as anchors
+
+This means order is stored in the database as a first-class field, even if the original browser source only exposed partial DOM snapshots.

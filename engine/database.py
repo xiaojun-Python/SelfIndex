@@ -495,6 +495,93 @@ class DatabaseManager:
                 (source, source_type, root_document_id),
             ).fetchall()
 
+    def list_conversation_raw_documents(
+        self,
+        *,
+        source: str,
+        source_type: str,
+        root_document_id: str,
+        conn=None,
+    ) -> list[dict[str, Any]]:
+        owns_connection = conn is None
+        if owns_connection:
+            conn = self.get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT raw_document_id, external_id, root_document_id, sequence,
+                       raw_payload, metadata_json, latest_revision_id, is_active
+                FROM raw_documents
+                WHERE source = ? AND source_type = ? AND root_document_id = ? AND is_active = 1
+                ORDER BY
+                    CASE WHEN sequence IS NULL THEN 1 ELSE 0 END,
+                    sequence,
+                    external_id
+                """,
+                (source, source_type, root_document_id),
+            ).fetchall()
+            return rows
+        finally:
+            if owns_connection:
+                conn.close()
+
+    def update_raw_document_sequence_fields(
+        self,
+        updates: list[dict[str, Any]],
+        *,
+        conn=None,
+    ) -> None:
+        if not updates:
+            return
+        owns_connection = conn is None
+        if owns_connection:
+            conn = self.get_connection()
+        try:
+            conn.executemany(
+                """
+                UPDATE raw_documents
+                SET sequence = ?,
+                    raw_payload = ?,
+                    metadata_json = ?
+                WHERE raw_document_id = ?
+                """,
+                [
+                    (
+                        update["sequence"],
+                        update.get("raw_payload"),
+                        update.get("metadata_json"),
+                        update["raw_document_id"],
+                    )
+                    for update in updates
+                ],
+            )
+            conn.executemany(
+                """
+                UPDATE raw_document_revisions
+                SET raw_payload = ?,
+                    metadata_json = ?
+                WHERE revision_id = ?
+                """,
+                [
+                    (
+                        update.get("raw_payload"),
+                        update.get("metadata_json"),
+                        update["latest_revision_id"],
+                    )
+                    for update in updates
+                    if update.get("latest_revision_id")
+                ],
+            )
+            if owns_connection:
+                conn.commit()
+        except Exception:
+            if owns_connection:
+                conn.rollback()
+            raise
+        finally:
+            if owns_connection:
+                conn.close()
+
     def mark_raw_document_inactive(self, raw_document_id: str, *, conn=None) -> dict[str, Any] | None:
         owns_connection = conn is None
         if owns_connection:

@@ -22,7 +22,7 @@ from engine.retriever import (
     search,
     search_memory,
 )
-from scripts.import_exports import import_chatgpt_browser_payload
+from scripts.import_exports import import_browser_capture_payload
 
 bp = Blueprint("main", __name__)
 EMBEDDING_VERSION = "bge-small-zh-v1.5"
@@ -166,9 +166,10 @@ def search_memory_view():
     return jsonify({"query": query, "count": len(results), "results": results})
 
 
+@bp.route("/api/ingest/browser-conversation", methods=["GET", "POST", "OPTIONS"])
 @bp.route("/api/ingest/chatgpt-browser", methods=["GET", "POST", "OPTIONS"])
-def ingest_chatgpt_browser_payload():
-    """接收浏览器扩展直接发送的 ChatGPT 对话 JSON，并导入 SelfIndex。"""
+def ingest_browser_capture_payload():
+    """接收浏览器扩展直接发送的浏览器对话 JSON，并导入 SelfIndex。"""
     if request.method == "OPTIONS":
         return _with_ingest_cors(jsonify({"ok": True}))
 
@@ -177,10 +178,10 @@ def ingest_chatgpt_browser_payload():
             jsonify(
                 {
                     "ok": True,
-                    "endpoint": "chatgpt-browser-ingest",
+                    "endpoint": "browser-conversation-ingest",
                     "method": "POST",
                     "local_only": True,
-                    "message": "Endpoint is available. Send normalized ChatGPT browser JSON via POST.",
+                    "message": "Endpoint is available. Send normalized browser conversation JSON via POST.",
                 }
             )
         )
@@ -198,7 +199,7 @@ def ingest_chatgpt_browser_payload():
     skip_embedding = bool(request.args.get("skip_embedding", "").strip().lower() in {"1", "true", "yes"})
 
     try:
-        result = import_chatgpt_browser_payload(
+        result = import_browser_capture_payload(
             payload,
             sqlite_db=current_app.config["SQLITE_DB"],
             vector_db=None if skip_embedding else current_app.config["VECTOR_DB"],

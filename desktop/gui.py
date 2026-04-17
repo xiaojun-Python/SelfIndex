@@ -198,9 +198,11 @@ class BackendWindow:
         """刷新服务状态显示。"""
         state = self.controller.get_service_state()
         if state.running:
-            # 格式化启动时间
-            started = time.strftime("%H:%M:%S", time.localtime(state.started_at or time.time()))
-            self.status_var.set(f"Service running | PID {state.pid} | started {started}")
+            if state.pid is not None:
+                started = time.strftime("%H:%M:%S", time.localtime(state.started_at or time.time()))
+                self.status_var.set(f"Service running | PID {state.pid} | started {started}")
+            else:
+                self.status_var.set("Service running | attached to existing listener")
         else:
             self.status_var.set("Service stopped")
 

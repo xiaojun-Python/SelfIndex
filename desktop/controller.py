@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import queue
 import shlex
+import socket
 import subprocess
 import sys
 import threading
@@ -37,6 +38,7 @@ class DesktopController:
 
         self._service_process: subprocess.Popen | None = None
         self._service_started_at: float | None = None
+        self._attached_external_service = False
         self._command_processes: set[subprocess.Popen] = set()
         self._lock = threading.RLock()
         self.log_queue: queue.Queue[str] = queue.Queue()
@@ -48,7 +50,7 @@ class DesktopController:
     def get_service_state(self) -> ProcessState:
         with self._lock:
             process = self._service_process
-            running = process is not None and process.poll() is None
+            running = (process is not None and process.poll() is None) or self._attached_external_service
             pid = process.pid if running and process is not None else None
             return ProcessState(
                 running=running,
@@ -58,8 +60,16 @@ class DesktopController:
 
     def start_service(self) -> None:
         with self._lock:
+            if self._attached_external_service:
+                self._emit("Service already attached to existing local listener.")
+                return
             if self._service_process is not None and self._service_process.poll() is None:
                 self._emit("Service already running.")
+                return
+            if self._is_local_service_listening():
+                self._attached_external_service = True
+                self._service_started_at = None
+                self._emit(f"Attached to existing local service on {self.web_url}")
                 return
 
             env = os.environ.copy()
@@ -87,6 +97,11 @@ class DesktopController:
 
     def stop_service(self) -> None:
         with self._lock:
+            if self._attached_external_service:
+                self._emit("Attached service is external; not stopping it.")
+                self._attached_external_service = False
+                self._service_started_at = None
+                return
             process = self._service_process
             if process is None or process.poll() is not None:
                 self._emit("Service is not running.")
@@ -209,3 +224,10 @@ class DesktopController:
     def _emit(self, message: str) -> None:
         timestamp = time.strftime("%H:%M:%S")
         self.log_queue.put(f"[{timestamp}] {message}")
+
+    def _is_local_service_listening(self) -> bool:
+        try:
+            with socket.create_connection((self.host, self.port), timeout=0.3):
+                return True
+        except OSError:
+            return False

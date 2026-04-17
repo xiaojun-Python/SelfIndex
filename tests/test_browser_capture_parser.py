@@ -5,10 +5,10 @@ import shutil
 import unittest
 from pathlib import Path
 
-from scripts.parsers.chatgpt_browser_parser import parse_format_chatgpt_browser
+from scripts.parsers.browser_capture_parser import parse_format_browser_capture
 
 
-class ChatGPTBrowserParserTests(unittest.TestCase):
+class BrowserCaptureParserTests(unittest.TestCase):
     def setUp(self) -> None:
         self.workspace_temp_root = Path.cwd() / ".tmp_tests"
         self.workspace_temp_root.mkdir(exist_ok=True)
@@ -61,7 +61,7 @@ class ChatGPTBrowserParserTests(unittest.TestCase):
             shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_browser_parser_orders_by_capture_index_and_preserves_model(self) -> None:
-        conv_meta, messages = list(parse_format_chatgpt_browser(str(self.browser_sample_path)))[0]
+        conv_meta, messages = list(parse_format_browser_capture(str(self.browser_sample_path)))[0]
 
         self.assertEqual(conv_meta["id"], "conv-browser-1")
         self.assertEqual([message["message_id"] for message in messages], ["msg-1", "msg-2"])
@@ -105,10 +105,48 @@ class ChatGPTBrowserParserTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        _conv_meta, messages = list(parse_format_chatgpt_browser(str(incremental_sample_path)))[0]
+        _conv_meta, messages = list(parse_format_browser_capture(str(incremental_sample_path)))[0]
 
         self.assertEqual([message["message_id"] for message in messages], ["msg-8", "msg-9"])
         self.assertEqual([message["sequence"] for message in messages], [8, 9])
+
+    def test_browser_parser_maps_grok_platform_to_grok_source(self) -> None:
+        grok_sample_path = self.test_dir / "grok-browser.json"
+        grok_sample_path.write_text(
+            json.dumps(
+                {
+                    "platform": "grok",
+                    "source_label": "browser",
+                    "conversation_id": "conv-grok-1",
+                    "conversation_title": "Grok Browser Capture",
+                    "captured_at": "2026-04-17T09:20:01.531Z",
+                    "messages": [
+                        {
+                            "message_id": "msg-grok-1",
+                            "role": "user",
+                            "content": "第一条，Grok 用户提问。",
+                            "capture_index": 0,
+                            "dom_turn_id": "response-msg-grok-1",
+                        },
+                        {
+                            "message_id": "msg-grok-2",
+                            "role": "assistant",
+                            "content": "第二条，Grok 助手回复。",
+                            "capture_index": 1,
+                            "dom_turn_id": "response-msg-grok-2",
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        conv_meta, messages = list(parse_format_browser_capture(str(grok_sample_path)))[0]
+
+        self.assertEqual(conv_meta["source"], "Grok")
+        self.assertEqual(conv_meta["platform"], "grok")
+        self.assertEqual([message["sequence"] for message in messages], [0, 1])
 
 if __name__ == "__main__":
     unittest.main()

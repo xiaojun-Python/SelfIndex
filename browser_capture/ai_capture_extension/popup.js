@@ -7,8 +7,20 @@ const output = document.getElementById("output");
 const summary = document.getElementById("summary");
 const syncStatus = document.getElementById("sync-status");
 
-const DEFAULT_ENDPOINT = "http://127.0.0.1:5000/api/ingest/chatgpt-browser";
+const DEFAULT_ENDPOINT = "http://127.0.0.1:5000/api/ingest/browser-conversation";
 const SYNC_STATE_KEY = "selfindexConversationSyncState";
+const SUPPORTED_PROVIDERS = [
+  {
+    id: "chatgpt",
+    label: "ChatGPT",
+    urlPattern: /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//i
+  },
+  {
+    id: "grok",
+    label: "Grok",
+    urlPattern: /^https:\/\/grok\.com\//i
+  }
+];
 
 let latestPayload = null;
 let latestSyncPlan = null;
@@ -32,6 +44,19 @@ function sanitizeFilename(value) {
     .slice(0, 80);
 }
 
+function getProviderForUrl(url) {
+  return SUPPORTED_PROVIDERS.find((provider) => provider.urlPattern.test(url || "")) || null;
+}
+
+function getConversationSyncKey(payloadOrPlatform, conversationId) {
+  if (typeof payloadOrPlatform === "string") {
+    return `${payloadOrPlatform}:${conversationId || ""}`;
+  }
+  const platform = payloadOrPlatform?.platform || "unknown";
+  const conversation = payloadOrPlatform?.conversation_id || "";
+  return `${platform}:${conversation}`;
+}
+
 async function loadSettings() {
   const stored = await chrome.storage.local.get(["selfindexEndpoint"]);
   endpointInput.value = stored.selfindexEndpoint || DEFAULT_ENDPOINT;
@@ -48,12 +73,12 @@ async function loadSyncStateMap() {
   return stored[SYNC_STATE_KEY] || {};
 }
 
-async function getConversationSyncState(conversationId) {
-  if (!conversationId) {
+async function getConversationSyncState(platform, conversationId) {
+  if (!platform || !conversationId) {
     return null;
   }
   const stateMap = await loadSyncStateMap();
-  return stateMap[conversationId] || null;
+  return stateMap[getConversationSyncKey(platform, conversationId)] || null;
 }
 
 async function saveConversationSyncState(payload) {
@@ -74,7 +99,7 @@ async function saveConversationSyncState(payload) {
     page_url: payload.page_url || null
   };
 
-  stateMap[conversationId] = nextState;
+  stateMap[getConversationSyncKey(payload)] = nextState;
   await chrome.storage.local.set({ [SYNC_STATE_KEY]: stateMap });
   return nextState;
 }
@@ -84,13 +109,14 @@ async function requestCapture() {
   if (!tab || !tab.id) {
     throw new Error("未找到当前标签页。");
   }
-  if (!/^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(tab.url || "")) {
-    throw new Error("请先切到 ChatGPT 对话页面。");
+  const provider = getProviderForUrl(tab.url || "");
+  if (!provider) {
+    throw new Error("请先切到已支持的 AI 对话页面。目前已支持 ChatGPT 和 Grok。");
   }
 
-  const response = await chrome.tabs.sendMessage(tab.id, { type: "SELFINDEX_CAPTURE_CHATGPT" });
+  const response = await chrome.tabs.sendMessage(tab.id, { type: "SELFINDEX_CAPTURE_CONVERSATION" });
   if (!response) {
-    throw new Error("没有收到页面响应，请刷新 ChatGPT 页面后重试。");
+    throw new Error("没有收到页面响应，请刷新当前 AI 页面后重试。");
   }
   if (!response.ok) {
     throw new Error(response.error || "抓取失败。");
@@ -109,6 +135,10 @@ function describeSyncPlan(plan, payload, syncState) {
 
   if (plan.mode === "initial") {
     return `这是这个会话的首次同步，将写入当前已加载的 ${plan.sync_count} 条消息。`;
+  }
+
+  if (plan.mode === "snapshot_merge") {
+    return `当前平台使用懒加载历史补抓，将合并当前已加载的 ${plan.sync_count} 条消息并重排顺序。`;
   }
 
   if (plan.mode === "incremental") {
@@ -134,6 +164,18 @@ function buildSyncPlan(payload, syncState) {
       payload: null,
       sync_count: 0,
       total_count: 0
+    };
+  }
+
+  if (payload?.platform === "grok") {
+    return {
+      mode: "snapshot_merge",
+      payload: {
+        ...payload,
+        sync_mode: "snapshot_merge"
+      },
+      sync_count: messages.length,
+      total_count: messages.length
     };
   }
 
@@ -193,6 +235,10 @@ function updateSendButton(plan) {
     sendButton.textContent = "首次同步到 SelfIndex";
     return;
   }
+  if (plan.mode === "snapshot_merge") {
+    sendButton.textContent = "合并当前已加载内容";
+    return;
+  }
   if (plan.mode === "resync") {
     sendButton.textContent = "重新同步当前内容";
     return;
@@ -211,13 +257,13 @@ function setPayloadState(payload, plan) {
 async function refreshConversationState() {
   setSummary("正在抓取当前页面里的已加载消息…");
   const payload = await requestCapture();
-  const syncState = await getConversationSyncState(payload.conversation_id);
+  const syncState = await getConversationSyncState(payload.platform, payload.conversation_id);
   const plan = buildSyncPlan(payload, syncState);
 
   output.value = JSON.stringify(payload, null, 2);
   setPayloadState(payload, plan);
   setSummary(
-    `已抓取 ${payload.message_count} 条消息，conversation_id=${payload.conversation_id || "unknown"}`
+    `已抓取 ${payload.message_count} 条消息，platform=${payload.platform || "unknown"}，conversation_id=${payload.conversation_id || "unknown"}`
   );
   setSyncStatus(describeSyncPlan(plan, payload, syncState));
   return { payload, plan, syncState };
@@ -228,7 +274,10 @@ async function ensureCaptureState() {
     return {
       payload: latestPayload,
       plan: latestSyncPlan,
-      syncState: await getConversationSyncState(latestPayload.conversation_id)
+      syncState: await getConversationSyncState(
+        latestPayload.platform,
+        latestPayload.conversation_id
+      )
     };
   }
   return refreshConversationState();
@@ -275,6 +324,8 @@ sendButton.addEventListener("click", async () => {
 
     if (plan.mode === "incremental") {
       setSummary(`正在发送 ${plan.sync_count} 条新增消息到本机 SelfIndex…`);
+    } else if (plan.mode === "snapshot_merge") {
+      setSummary(`正在合并当前已加载的 ${plan.sync_count} 条消息到本机 SelfIndex…`);
     } else {
       setSummary(`正在发送 ${plan.sync_count} 条消息到本机 SelfIndex…`);
     }
@@ -284,7 +335,7 @@ sendButton.addEventListener("click", async () => {
     const nextPlan = buildSyncPlan(payload, savedState);
     setPayloadState(payload, nextPlan);
     setSummary(
-      `已导入 ${result.raw_documents} 条消息，memory_units=${result.memory_units}，conversation_id=${result.conversation_id || payload.conversation_id || "unknown"}`
+      `已导入 ${result.raw_documents} 条消息，platform=${payload.platform || "unknown"}，memory_units=${result.memory_units}，resequenced=${result.resequenced_documents || 0}，conversation_id=${result.conversation_id || payload.conversation_id || "unknown"}`
     );
     setSyncStatus(describeSyncPlan(nextPlan, payload, savedState));
   } catch (error) {
@@ -327,7 +378,7 @@ async function initializePopup() {
     await refreshConversationState();
   } catch (error) {
     setSummary(error.message || String(error));
-    setSyncStatus("打开 ChatGPT 对话页后再试一次。");
+    setSyncStatus("打开已支持的 AI 对话页后再试一次。");
     endpointInput.value = endpointInput.value || DEFAULT_ENDPOINT;
   }
 }

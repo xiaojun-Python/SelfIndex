@@ -29,4 +29,6 @@ legacy/*
 
 CLAUDE.md
 
-
+.tmp_tests/
+.tmp_tests/*
+.ruff_cache/

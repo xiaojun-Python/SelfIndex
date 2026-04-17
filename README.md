@@ -2,84 +2,93 @@
 
 # SelfIndex
 
-SelfIndex 是一个面向长期使用的个人记忆系统原型。
+SelfIndex is an alpha personal memory system focused on preserving source material, building searchable memory units, and keeping revision history for changing data.
 
-当前阶段的重点不是做“人格化 AI”，而是先把这条链路做稳：
+It is not trying to be a general-purpose AI agent product yet. The current goal is to make the memory pipeline reliable:
 
-- 保存原始资料
-- 生成可检索的记忆单元
-- 支持向量检索与回溯
-- 支持可变来源的版本历史
+- keep raw source material
+- keep a current state plus revision history
+- derive searchable memory units
+- support local vector retrieval with traceability
+- support browser-captured AI conversations and file-based imports
 
-## 当前核心结构
+## Current Status
 
-- `raw_documents`
-  当前文档状态表。保存某条资料“现在是什么样子”。
-- `raw_document_revisions`
-  历史版本表。保存文档每次变化的快照，包括 `updated` 和 `deleted`。
-- `memory_units`
-  从当前 revision 派生出的记忆单元。用于检索、摘要、召回域控制。
-- `protected_terms`
-  受保护词规则表。数据库内以 `base64` 做弱混淆存储，不再以 `.env` 为主来源。
-- `import_jobs`
-  导入任务记录。
+SelfIndex is suitable for local, personal use and ongoing experimentation.
 
-## 当前已完成能力
+It already supports:
 
-- ChatGPT / OpenAI 导出导入
-- Markdown 目录同步
-- Markdown 忽略规则
-- Markdown 删除检测与 `inactive` 标记
-- 独立 embedding workflow
-- 解锁式查询
-- SQLCipher 数据库支持
+- ChatGPT export import
+- ChatGPT browser capture with semi-automatic sync
+- Grok browser capture with lazy-load snapshot merge
+- Markdown directory sync
+- revision-aware raw document storage
+- local vector retrieval with trace-back to source documents
+- protected recall domains and unlock-style queries
+- SQLite / SQLCipher storage
 
-## 运行方式
+It is still alpha software:
 
-启动 Web：
+- browser capture depends on page structure and may break when sites change
+- multi-platform support is still early
+- conversation replay UX is not finished
+- the desktop runtime is local-first and Windows-oriented
 
-```bash
-python -m app.main
+## Recommended Start Path
+
+Use the unified service script. It now starts the desktop runtime, system tray icon, and web service together:
+
+```powershell
+.\scripts\selfindex_service.ps1 start
 ```
 
-启动桌面壳（系统托盘 + 后台页）：
+Useful commands:
 
-```bash
-python -m desktop.main
+```powershell
+.\scripts\selfindex_service.ps1 status
+.\scripts\selfindex_service.ps1 restart
+.\scripts\selfindex_service.ps1 stop
 ```
 
-如果希望脱离终端窗口运行：
+If you only want the web service without the tray runtime:
 
-```bash
-pythonw -m desktop.main
+```powershell
+.\scripts\selfindex_service.ps1 start -NoTray
 ```
 
-导入导出文件：
+Default URLs:
+
+- Web UI: `http://127.0.0.1:5000/`
+- Browser ingest: `http://127.0.0.1:5000/api/ingest/browser-conversation`
+
+## Main Workflows
+
+### Import exported conversation files
 
 ```bash
 python -m scripts.import_exports --file data/raw_exports/your_export.json
 ```
 
-只导入 archive / memory，不做 embedding：
+Skip embeddings during import:
 
 ```bash
 python -m scripts.import_exports --file data/raw_exports/your_export.json --skip-embedding
 ```
 
-单独构建 embeddings：
+Build embeddings later:
 
 ```bash
 python -m scripts.build_embeddings
 python -m scripts.build_embeddings --batch-size 16 --max-units 200
 ```
 
-同步 markdown 目录：
+### Sync a Markdown directory
 
 ```bash
 python -m scripts.sync_markdown_directory --dir path/to/notes --ignore-file path/to/notes/.selfindexignore --skip-embedding
 ```
 
-`.selfindexignore` 例子：
+Example `.selfindexignore`:
 
 ```text
 archive/
@@ -87,50 +96,69 @@ templates/*
 draft.md
 ```
 
-查看 / 添加 protected terms：
+### Manage protected terms
 
 ```bash
 python -m scripts.manage_protected_terms list
-python -m scripts.manage_protected_terms add "敏感文本" --domain sensitive
-python -m scripts.manage_protected_terms add "真实姓名" --domain identity
+python -m scripts.manage_protected_terms add "Sensitive text" --domain sensitive
+python -m scripts.manage_protected_terms add "Real name" --domain identity
 ```
 
-按规则回填 `recall_domain`：
+Backfill recall domains:
 
 ```bash
 python -m scripts.backfill_recall_domains --dry-run
 python -m scripts.backfill_recall_domains
 ```
 
-审计 ChatGPT 会话顺序 PoC：
+### Browser capture
 
-```bash
-python -m scripts.audit_chatgpt_order --conversation-id your-conversation-id --export data/raw_exports/chatgpt_export.json --browser-sample path/to/chatgpt_browser_sample.json
-```
+The browser extension lives in:
 
-运行测试：
+`browser_capture/ai_capture_extension`
 
-```bash
-python -m unittest discover -s tests -v
-```
+Current browser support:
 
-## 解锁式查询
+- ChatGPT: incremental sync for newly appended messages
+- Grok: snapshot merge for lazy-loaded history
 
-SelfIndex 支持基于 `recall_domain` 的解锁式查询。
+The extension currently targets local ingestion into the running SelfIndex instance.
 
-- 默认查询只召回 `default`
-- 显式前缀才会解锁受保护内容
+## Retrieval Model
 
-当前前缀来自 `.env`：
+SelfIndex uses recall domains to control sensitive retrieval.
+
+- default queries only retrieve `default`
+- explicit prefixes unlock protected domains
+
+Current prefixes are configured in `.env`:
 
 ```env
 UNLOCK_PREFIX_IDENTITY=:
 UNLOCK_PREFIX_SENSITIVE=!
 ```
 
-## 当前建议阅读顺序
+## Documentation
+
+Recommended reading order:
 
 1. `docs/current-system.md`
 2. `docs/architecture.md`
 3. `docs/database-structure.md`
 4. `docs/code-map.md`
+
+## Running Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Project Positioning
+
+SelfIndex is best described as:
+
+- a local-first personal memory prototype
+- a revision-aware archive plus retrieval system
+- an active research and implementation repository
+
+It should not yet be presented as a polished end-user product.
