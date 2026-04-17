@@ -18,7 +18,7 @@ SelfIndex is suitable for local, personal use and ongoing experimentation.
 
 It already supports:
 
-- ChatGPT export import
+- ChatGPT、Grok、DeepSeek export import
 - ChatGPT browser capture with semi-automatic sync
 - Grok browser capture with lazy-load snapshot merge
 - Markdown directory sync
