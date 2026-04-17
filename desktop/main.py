@@ -19,6 +19,7 @@ RUNTIME_MUTEX_NAME = "Local\\SelfIndexDesktopRuntime"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 PID_FILE = DATA_DIR / "selfindex-service.pid"
+ICON_ICO_PATH = PROJECT_ROOT / "assets" / "icons" / "icon.ico"
 
 
 def _show_already_running_message() -> None:
@@ -54,6 +55,7 @@ class DesktopRuntime:
         self._configure_dpi_awareness()
         self.root = tk.Tk()
         self._configure_root_scaling()
+        self._configure_app_icon()
         self.root.withdraw()
 
         self.controller = DesktopController(
@@ -136,6 +138,14 @@ class DesktopRuntime:
         default_font.configure(size=max(10, round(10 * scaling)))
         text_font.configure(size=max(10, round(10 * scaling)))
         heading_font.configure(size=max(11, round(11 * scaling)))
+
+    def _configure_app_icon(self) -> None:
+        if not ICON_ICO_PATH.exists():
+            return
+        try:
+            self.root.iconbitmap(default=str(ICON_ICO_PATH))
+        except Exception:
+            pass
 
 
 def main() -> None:

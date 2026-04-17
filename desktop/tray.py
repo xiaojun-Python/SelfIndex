@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import threading
 from ctypes import wintypes
+from pathlib import Path
 
 HANDLE = wintypes.HANDLE
 HCURSOR = HANDLE
@@ -34,6 +35,9 @@ IDI_APPLICATION = 32512
 IMAGE_ICON = 1
 LR_DEFAULTSIZE = 0x0040
 LR_SHARED = 0x8000
+LR_LOADFROMFILE = 0x0010
+SM_CXSMICON = 49
+SM_CYSMICON = 50
 
 CS_VREDRAW = 0x0001
 CS_HREDRAW = 0x0002
@@ -44,6 +48,8 @@ MENU_OPEN_BACKEND = 1001
 MENU_OPEN_WEB = 1002
 MENU_RESTART = 1003
 MENU_EXIT = 1004
+TRAY_ICON_PATH = Path(__file__).resolve().parents[1] / "assets" / "icons" / "tray-icon.ico"
+ICON_PATH = Path(__file__).resolve().parents[1] / "assets" / "icons" / "icon.ico"
 
 
 class WNDCLASS(ctypes.Structure):
@@ -128,6 +134,7 @@ class TrayIcon:
         self._thread_ready = threading.Event()
         self._hwnd = None
         self._notify_id = None
+        self._hicon = None
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -156,6 +163,8 @@ class TrayIcon:
         wnd_class.lpfnWndProc = ctypes.cast(wnd_proc, ctypes.c_void_p).value
         wnd_class.hInstance = self.hinstance
         wnd_class.lpszClassName = class_name
+        hicon = self._load_app_icon()
+        wnd_class.hIcon = hicon
 
         self.user32.RegisterClassW(ctypes.byref(wnd_class))
 
@@ -175,8 +184,7 @@ class TrayIcon:
         )
         self._hwnd = hwnd
         self._wnd_proc_ref = wnd_proc
-
-        hicon = self.user32.LoadIconW(None, IDI_APPLICATION)
+        self._hicon = hicon
         notify_id = NOTIFYICONDATA()
         notify_id.cbSize = ctypes.sizeof(NOTIFYICONDATA)
         notify_id.hWnd = hwnd
@@ -197,6 +205,23 @@ class TrayIcon:
         self.shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(notify_id))
         self.user32.DestroyWindow(hwnd)
         self.user32.UnregisterClassW(class_name, self.hinstance)
+
+    def _load_app_icon(self):
+        icon_path = TRAY_ICON_PATH if TRAY_ICON_PATH.exists() else ICON_PATH
+        if icon_path.exists():
+            cx = self.user32.GetSystemMetrics(SM_CXSMICON)
+            cy = self.user32.GetSystemMetrics(SM_CYSMICON)
+            hicon = self.user32.LoadImageW(
+                None,
+                str(icon_path),
+                IMAGE_ICON,
+                cx,
+                cy,
+                LR_LOADFROMFILE,
+            )
+            if hicon:
+                return hicon
+        return self.user32.LoadIconW(None, IDI_APPLICATION)
 
     def _show_menu(self) -> None:
         menu = self.user32.CreatePopupMenu()
