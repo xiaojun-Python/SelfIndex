@@ -9,7 +9,12 @@ data/*
 !data/.gitkeep
 *.db
 *.sqlite
+*.sqlite3
+*.db-*
+*.sqlite-*
+*.sqlite3-*
 *.log
+.DS_Store
 
 # 排除敏感配置文件
 .env
@@ -25,10 +30,10 @@ legacy/*
 *.ipynb
 .ipynb_checkpoints/
 
-.gitignore
-
 CLAUDE.md
 
 .tmp_tests/
 .tmp_tests/*
+dist-dev/
+.selfindex-backup-*/
 .ruff_cache/

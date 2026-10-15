@@ -4,7 +4,7 @@ param(
     [string]$Action = "status",
 
     [string]$HostAddress = "127.0.0.1",
-    [int]$Port = 5000,
+    [int]$Port = 5050,
     [switch]$NoTray
 )
 

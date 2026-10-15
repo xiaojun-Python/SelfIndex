@@ -11,6 +11,10 @@
 | `memory_units` | 从当前修订版派生的面向检索的分块 |
 | `protected_terms` | 受保护的召回规则 |
 | `import_jobs` | 导入任务历史 |
+| `vector_deletion_outbox` | SQL 提交后待重放的 Chroma 删除意图 |
+| `profile_identity` | 资料库的随机持久身份，用于本机客户端区分同步目标 |
+| `markdown_sources` | 已注册 Markdown 根目录与身份命名空间 |
+| `source_write_outbox` | App 编辑已入库、待写回源 Markdown 的持久意图 |
 
 ## 关系模型
 
@@ -19,6 +23,9 @@ raw_documents (1) ────< raw_document_revisions (N)
 raw_document_revisions (1) ────< memory_units (N)
 protected_terms（独立规则）
 import_jobs（独立任务日志）
+vector_deletion_outbox（独立删除队列）
+source_write_outbox（独立源文件写回队列）
+markdown_sources（独立来源注册表）
 ```
 
 ## `raw_documents`
@@ -40,6 +47,7 @@ import_jobs（独立任务日志）
 - `content_hash`
 - `current_content_hash`
 - `latest_revision_id`
+- `edit_version`（每次有意义的当前状态变动递增，A→B→A 也不会复用旧版本）
 - `is_active`
 - `raw_payload`
 - `metadata_json`
@@ -101,6 +109,19 @@ import_jobs（独立任务日志）
 - 记忆单元从当前修订版派生
 - 检索默认只针对活跃文档
 - `recall_domain` 是存储的结果标签，而非原始规则定义
+- `embedding_version` 标识该单元的嵌入模型；Chroma 集合另以 `selfindex_embedding_model` 记录整体模型
+
+## `vector_deletion_outbox`
+
+归档变更在同一 SQL 事务中排入旧向量 ID。重放时持有 SQL 写锁，确认 ID 不再属于活跃当前修订版后删除 Chroma 向量，再确认队列项。删除失败不会丢失意图；SQL 与 Chroma 并非原子事务，仍需定期对账。
+
+## `source_write_outbox`
+
+App 编辑同步自 Markdown 目录的文档时，先在同一 SQL 事务中保存新正文与待写源文件意图。提交后核对源文件旧内容哈希，并用同目录临时文件原子替换；失败的意图留在队列，服务启动时重试。若源文件被外部编辑，拒绝覆盖并等待人工核对。待写期间目录同步拒绝运行，避免旧文件覆盖新归档。SQL 与文件系统不是单一原子事务。
+
+## `markdown_sources`
+
+第一个或旧版 Markdown 根目录保留既有原始文档 ID；其后的根目录使用根路径摘要作为命名空间，避免不同目录里的同名文件碰撞。旧 Windows 路径到 Mac 的身份迁移尚未执行。
 
 ## `protected_terms`
 

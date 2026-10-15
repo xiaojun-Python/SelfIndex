@@ -149,6 +149,13 @@ class DesktopRuntime:
 
 
 def main() -> None:
+    if not sys.platform.startswith("win"):
+        raise SystemExit(
+            "The desktop tray runtime is currently Windows-only. "
+            "On macOS, start the web service with ./scripts/selfindex_service.sh start "
+            "or run python -m app.main."
+        )
+
     kernel32 = ctypes.windll.kernel32
     mutex = kernel32.CreateMutexW(None, False, RUNTIME_MUTEX_NAME)
     if not mutex:

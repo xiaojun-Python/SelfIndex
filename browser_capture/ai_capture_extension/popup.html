@@ -15,14 +15,23 @@
         <input
           id="endpoint-input"
           type="text"
-          value="http://127.0.0.1:5000/api/ingest/browser-conversation"
+          value="http://127.0.0.1:5050/api/ingest/browser-conversation"
           spellcheck="false"
         >
+      </label>
+
+      <label class="field">
+        <span>本机写入令牌</span>
+        <span class="token-control">
+          <input id="token-input" type="password" autocomplete="off" spellcheck="false">
+          <button id="token-visibility-btn" class="visibility-button" type="button" aria-label="显示令牌" title="显示令牌">显示</button>
+        </span>
       </label>
 
       <div class="actions">
         <button id="capture-btn" type="button">抓取当前对话</button>
         <button id="send-btn" type="button" disabled>同步新增内容</button>
+        <button id="resync-btn" type="button" disabled>重同步已加载内容</button>
         <button id="copy-btn" type="button" disabled>复制 JSON</button>
         <button id="download-btn" type="button" disabled>下载 JSON</button>
       </div>

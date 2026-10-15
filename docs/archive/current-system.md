@@ -1,5 +1,7 @@
 # Current System
 
+> Archived on 2026-09-27. This snapshot predates the current macOS desktop/service and index recovery work. See `docs/README_ZH.md` for maintained documents.
+
 This document answers a simple question:
 
 What SelfIndex already is, and what it is not yet.

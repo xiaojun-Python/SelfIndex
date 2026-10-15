@@ -71,7 +71,11 @@
 4. 点击 `加载已解压的扩展程序`
 5. 选择：
 
-`C:\Users\xiaoj\PycharmProjects\SelfIndex\browser_capture\ai_capture_extension`
+在当前仓库中选择此文件夹：
+
+`browser_capture/ai_capture_extension`
+
+在 Windows 上，选择仓库内同一个 `browser_capture\ai_capture_extension` 文件夹。
 
 ## 使用扩展
 
@@ -81,6 +85,7 @@
 4. 选择以下操作之一：
    - 捕获当前对话
    - 同步到 SelfIndex
+   - 重同步当前已加载内容
    - 复制 JSON
    - 下载 JSON
 
@@ -90,9 +95,10 @@
 
 ChatGPT 目前使用半自动增量同步：
 
-- 扩展记住每个对话上次同步的 `message_id`
+- 扩展先读取 `/api/v1/status` 的资料库 `profile_id`，每个目标库分别保存同步位置；服务身份不可读时仍可抓取/导出，但不执行同步
+- 扩展记住每个目标库、每个对话上次同步的 `message_id` 和已加载消息的内容摘要
 - 如果当前页面包含该锚点，则只发送较新的消息
-- 如果锚点缺失，扩展回退到较大范围的重新同步
+- 如果旧消息内容改变、旧状态无摘要或锚点缺失，扩展重同步当前已加载快照；也可手动点击“重同步已加载内容”
 
 ### Grok
 
@@ -108,7 +114,7 @@ Grok 目前使用快照合并：
 
 当前端点：
 
-`POST http://127.0.0.1:5000/api/ingest/browser-conversation`
+`POST http://127.0.0.1:5050/api/ingest/browser-conversation`
 
 路由名称仍有历史遗留，但载荷现在接受多种浏览器平台。
 
@@ -117,6 +123,13 @@ Grok 目前使用快照合并：
 1. SelfIndex 在本地运行
 2. 扩展端点与本地运行时匹配
 3. 请求来自本机
+4. 在扩展弹窗的“本机写入令牌”输入框中配置写令牌
+
+写令牌由 SelfIndex 本机文件 `data/api-write-token` 提供。将该文件中的令牌粘贴到扩展设置；扩展通过 `chrome.storage.local` 保存在当前浏览器配置中，并在每次导入 POST 请求中发送 `Authorization: Bearer <token>`。令牌输入默认隐藏，可用旁边的按钮切换显示。未配置令牌时扩展会阻止发送并提示先完成配置。
+
+请勿将令牌放入对话载荷、导出的 JSON 或公开内容中。更改或轮换本机令牌后，也要更新扩展中的保存值。
+
+导入响应为 `200` 且 `index_status=ready` 时，本次内容已归档并索引；`202` 且 `index_status=pending` 表示内容已归档，但搜索索引尚未完成。扩展会显示待索引提示，当前仍保存同步游标；需要运行 `python -m scripts.build_embeddings` 补建，或在受控维护窗口做一致性审计。`202` 不表示后台自动任务已排队。发送超时后服务可能仍已归档，重试采用同一消息 ID 幂等导入，不把超时当作“确认未写入”。
 
 ## 手动调试
 
@@ -143,6 +156,7 @@ window.SELFINDEX_CAPTURE_CONVERSATION()
 ## 当前限制
 
 - 仅捕获当前加载的消息
+- 内容摘要只能发现**当前已加载**的旧消息变化；没加载到的历史消息无法检查，不等于平台完整备份
 - 浏览器捕获仍依赖 DOM 结构
 - 大多数浏览器捕获来源的 `parent_message_id` 仍缺失
 - 时间戳不保证准确

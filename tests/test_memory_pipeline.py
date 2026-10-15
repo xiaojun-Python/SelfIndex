@@ -10,9 +10,11 @@ import json
 import shutil
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from engine.database import DatabaseManager
 from engine.retriever import get_memory_unit_payload, search_memory
+from engine.vector_outbox import drain_vector_deletions
 from scripts.build_embeddings import build_missing_embeddings
 from scripts.import_exports import import_export_file
 
@@ -178,6 +180,31 @@ class MemoryPipelineTests(unittest.TestCase):
         self.assertIsNotNone(payload)
         self.assertIn("向量", payload["raw_document"]["content"])
 
+    def test_search_uses_sql_text_when_vector_copy_is_stale(self) -> None:
+        import_export_file(
+            self.export_path,
+            sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db,
+            embedder=self.embedder,
+        )
+        memory_unit_id = next(iter(self.vector_db.records))
+        self.vector_db.records[memory_unit_id]["document"] = "OLD_VECTOR_TEXT"
+        self.vector_db.records[memory_unit_id]["metadata"]["summary"] = "OLD_SUMMARY"
+
+        results = search_memory(
+            self.sqlite_db,
+            self.vector_db,
+            query="向量",
+            limit=5,
+            embedder=self.embedder,
+        )
+        result = next(item for item in results if item["memory_unit_id"] == memory_unit_id)
+        detail = self.sqlite_db.get_memory_unit_detail(memory_unit_id)
+        self.assertEqual(result["content"], detail["memory_content"])
+        self.assertEqual(result["summary"], detail["summary"])
+        self.assertNotIn("OLD_VECTOR_TEXT", result["content"])
+        self.assertNotIn("OLD_SUMMARY", result["summary"])
+
     def test_reimport_replaces_memory_units_without_vector_duplicates(self) -> None:
         first = import_export_file(
             self.export_path,
@@ -211,6 +238,23 @@ class MemoryPipelineTests(unittest.TestCase):
         self.assertEqual(import_job["raw_documents_count"], result["raw_documents"])
         self.assertEqual(import_job["memory_units_count"], result["memory_units"])
 
+    def test_import_sql_failure_records_rolled_back_counts(self) -> None:
+        with patch.object(self.sqlite_db, "insert_memory_units", side_effect=RuntimeError("synthetic SQL failure")):
+            with self.assertRaisesRegex(RuntimeError, "synthetic SQL failure"):
+                import_export_file(
+                    self.export_path,
+                    sqlite_db=self.sqlite_db,
+                    vector_db=self.vector_db,
+                    embedder=self.embedder,
+                )
+
+        self.assertEqual(self.sqlite_db.count_rows("raw_documents"), 0)
+        with self.sqlite_db.get_connection() as conn:
+            job = conn.execute("SELECT status, raw_documents_count, memory_units_count FROM import_jobs").fetchone()
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(job["raw_documents_count"], 0)
+        self.assertEqual(job["memory_units_count"], 0)
+
     def test_import_can_skip_embedding_and_vector_write(self) -> None:
         result = import_export_file(
             self.export_path,
@@ -220,6 +264,7 @@ class MemoryPipelineTests(unittest.TestCase):
         )
 
         self.assertEqual(result["raw_documents"], 2)
+        self.assertEqual(result["index_status"], "pending")
         self.assertEqual(self.vector_db.records, {})
         memory_units = self.sqlite_db.get_memory_units_by_raw_document_id(
             "chatgpt:conversation_message:msg-1"
@@ -230,6 +275,56 @@ class MemoryPipelineTests(unittest.TestCase):
         import_job = self.sqlite_db.get_import_job(result["import_id"])
         self.assertEqual(import_job["status"], "success")
         self.assertIn('"embedding_enabled": false', import_job["import_config_json"])
+
+    def test_skipped_reimport_keeps_old_vector_cleanup_intent(self) -> None:
+        import_export_file(
+            self.export_path, sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db, embedder=self.embedder,
+        )
+        old_id = self.sqlite_db.get_memory_units_by_raw_document_id(
+            "chatgpt:conversation_message:msg-1"
+        )[0]["memory_unit_id"]
+        updated = json.loads(self.export_path.read_text(encoding="utf-8"))
+        updated[0]["mapping"]["node-1"]["message"]["content"]["parts"][0] = "更新后的内容"
+        self.export_path.write_text(json.dumps(updated, ensure_ascii=False), encoding="utf-8")
+
+        result = import_export_file(
+            self.export_path, sqlite_db=self.sqlite_db,
+            vector_db=None, skip_embedding=True,
+        )
+        self.assertEqual(result["index_status"], "pending")
+        self.assertIn(old_id, self.vector_db.records)
+        self.assertEqual(self.sqlite_db.count_pending_vector_deletions(), 1)
+        drain_vector_deletions(self.sqlite_db, self.vector_db)
+        self.assertNotIn(old_id, self.vector_db.records)
+        self.assertEqual(self.sqlite_db.count_pending_vector_deletions(), 0)
+
+    def test_reimport_retries_pending_index_after_archived_content(self) -> None:
+        class FailingEmbedder:
+            def embed_documents(self, texts):
+                raise RuntimeError("synthetic embedding failure")
+
+        with self.assertLogs("scripts.import_exports", level="ERROR"):
+            first = import_export_file(
+                self.export_path,
+                sqlite_db=self.sqlite_db,
+                vector_db=self.vector_db,
+                embedder=FailingEmbedder(),
+            )
+        self.assertEqual(first["index_status"], "pending")
+        self.assertEqual(self.sqlite_db.get_import_job(first["import_id"])["status"], "index_pending")
+        self.assertIsNotNone(self.sqlite_db.get_raw_document("chatgpt:conversation_message:msg-1"))
+
+        second = import_export_file(
+            self.export_path,
+            sqlite_db=self.sqlite_db,
+            vector_db=self.vector_db,
+            embedder=self.embedder,
+        )
+        self.assertEqual(second["index_status"], "ready")
+        self.assertEqual(self.sqlite_db.get_import_job(second["import_id"])["status"], "success")
+        self.assertEqual(len(self.vector_db.records), second["memory_units"])
+        self.assertFalse(self.sqlite_db.get_memory_units_needing_embeddings())
 
     def test_build_embeddings_processes_only_pending_units(self) -> None:
         import_export_file(

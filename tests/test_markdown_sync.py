@@ -4,10 +4,11 @@ import shutil
 import unittest
 from pathlib import Path
 
-from engine.database import DatabaseManager
+from engine.database import DatabaseManager, ReadOnlyDatabase
 from scripts.sync_markdown_directory import (
     discover_markdown_files,
     load_ignore_patterns,
+    preview_markdown_directory,
     sync_markdown_directory,
 )
 
@@ -96,12 +97,101 @@ class MarkdownSyncTests(unittest.TestCase):
             sqlite_db=self.sqlite_db,
             vector_db=None,
             ignore_file=self.notes_dir / ".selfindexignore",
+            allow_empty_source=True,
         )
 
         self.assertEqual(result["inactivated"], 1)
         raw_document = self.sqlite_db.get_raw_document("markdown:note_file:keep.md")
         self.assertEqual(raw_document["is_active"], 0)
         self.assertEqual(self.sqlite_db.count_rows("raw_document_revisions"), 2)
+
+    def test_missing_source_root_does_not_inactivate_documents(self) -> None:
+        sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+        original = self.sqlite_db.get_raw_document("markdown:note_file:keep.md")
+        shutil.rmtree(self.notes_dir)
+
+        with self.assertRaises(FileNotFoundError):
+            sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+
+        current = self.sqlite_db.get_raw_document("markdown:note_file:keep.md")
+        self.assertEqual(current["is_active"], 1)
+        self.assertEqual(current["latest_revision_id"], original["latest_revision_id"])
+
+    def test_scan_failure_does_not_inactivate_documents(self) -> None:
+        from unittest.mock import patch
+
+        sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+
+        def fail_scan(_root, *, onerror):
+            onerror(PermissionError("synthetic scan failure"))
+            yield from ()
+
+        with patch("scripts.sync_markdown_directory.os.walk", side_effect=fail_scan):
+            with self.assertRaises(PermissionError):
+                sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+
+        self.assertEqual(self.sqlite_db.get_raw_document("markdown:note_file:keep.md")["is_active"], 1)
+
+    def test_replaced_source_root_does_not_inactivate_documents(self) -> None:
+        from unittest.mock import patch
+
+        sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+
+        def replace_root(_root, **_kwargs):
+            self.notes_dir.rename(self.test_dir / "old-notes")
+            self.notes_dir.mkdir()
+            return []
+
+        with patch("scripts.sync_markdown_directory.discover_markdown_files", side_effect=replace_root):
+            with self.assertRaises(OSError):
+                sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+
+        self.assertEqual(self.sqlite_db.get_raw_document("markdown:note_file:keep.md")["is_active"], 1)
+
+    def test_empty_source_requires_explicit_clear(self) -> None:
+        sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+        for note in self.notes_dir.rglob("*.md"):
+            note.unlink()
+
+        with self.assertRaisesRegex(RuntimeError, "no files"):
+            sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+        self.assertEqual(self.sqlite_db.get_raw_document("markdown:note_file:keep.md")["is_active"], 1)
+
+        result = sync_markdown_directory(
+            self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None, allow_empty_source=True,
+        )
+        self.assertGreater(result["inactivated"], 0)
+        self.assertEqual(self.sqlite_db.get_raw_document("markdown:note_file:keep.md")["is_active"], 0)
+
+    def test_two_roots_with_same_relative_name_do_not_overwrite(self) -> None:
+        first = sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+        other_root = self.test_dir / "other-notes"
+        other_root.mkdir()
+        (other_root / "keep.md").write_text("other content", encoding="utf-8")
+        second = sync_markdown_directory(other_root, sqlite_db=self.sqlite_db, vector_db=None)
+
+        self.assertEqual(first["identity_mode"], "legacy")
+        self.assertEqual(second["identity_mode"], "scoped")
+        self.assertNotEqual(first["source_id"], second["source_id"])
+        self.assertEqual(self.sqlite_db.get_raw_document("markdown:note_file:keep.md")["content"], "# Keep\n\nhello")
+        scoped_id = f"markdown:note_file:@{second['source_id']}/keep.md"
+        self.assertEqual(self.sqlite_db.get_raw_document(scoped_id)["content"], "other content")
+        self.assertEqual(self.sqlite_db.count_rows("raw_documents"), 4)
+        self.assertEqual(
+            sync_markdown_directory(other_root, sqlite_db=self.sqlite_db, vector_db=None)["skipped"], 1
+        )
+
+    def test_preview_reports_deletions_without_registering_or_inactivating(self) -> None:
+        sync_markdown_directory(self.notes_dir, sqlite_db=self.sqlite_db, vector_db=None)
+        (self.notes_dir / "keep.md").unlink()
+        before_sources = self.sqlite_db.count_rows("markdown_sources")
+        preview = preview_markdown_directory(
+            self.notes_dir, sqlite_db=ReadOnlyDatabase(self.sqlite_db.db_path)
+        )
+        self.assertEqual(preview["would_inactivate"], 1)
+        self.assertEqual(preview["inactivation_sample"], ["keep.md"])
+        self.assertEqual(self.sqlite_db.count_rows("markdown_sources"), before_sources)
+        self.assertEqual(self.sqlite_db.get_raw_document("markdown:note_file:keep.md")["is_active"], 1)
 
 
 if __name__ == "__main__":

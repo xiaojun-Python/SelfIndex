@@ -132,60 +132,54 @@ def search_memory(
     query_vector = embedder.embed_query(parsed.cleaned)
 
     requested_limit = limit or settings.default_search_k
+    display_limit = limit if limit is not None else settings.max_results_display
     n_results = max(requested_limit, min(settings.default_search_k, requested_limit * 10))
-    raw_results = vector_db.search(
-        query_vector,
-        n_results=n_results,
-    )
+    max_candidates = max(n_results, min(2000, max(n_results * 8, display_limit * 50)))
 
-    ids = raw_results.get("ids") or []
-    documents = raw_results.get("documents") or []
-    metadatas = raw_results.get("metadatas") or []
-    distances = raw_results.get("distances") or []
+    while True:
+        raw_results = vector_db.search(query_vector, n_results=n_results)
+        ids = raw_results.get("ids") or []
+        distances = raw_results.get("distances") or []
+        if not ids or not ids[0]:
+            return []
 
-    if not ids or not ids[0]:
-        return []
+        details_by_id = sqlite_db.get_memory_unit_details(ids[0])
+        results: list[dict[str, Any]] = []
+        for index, memory_unit_id in enumerate(ids[0]):
+            detail = details_by_id.get(memory_unit_id)
+            if detail is None or not detail.get("is_active", 1) or not detail.get("revision_is_current", 1):
+                continue
+            detail_domain = detail["recall_domain"] if "recall_domain" in detail.keys() else "default"
+            if (detail_domain or "default") not in parsed.allowed_domains:
+                continue
 
-    details_by_id = sqlite_db.get_memory_unit_details(ids[0])
-    results: list[dict[str, Any]] = []
-    for index, memory_unit_id in enumerate(ids[0]):
-        metadata = (metadatas[0][index] if metadatas and metadatas[0] else {}) or {}
-        detail = details_by_id.get(memory_unit_id)
-        if detail is None:
-            continue
-        if not detail.get("is_active", 1):
-            continue
-        detail_domain = detail["recall_domain"] if "recall_domain" in detail.keys() else "default"
-        if (detail_domain or "default") not in parsed.allowed_domains:
-            continue
-
-        results.append(
-            {
-                "memory_unit_id": memory_unit_id,
-                "score": distances[0][index] if distances and distances[0] else None,
-                "content": documents[0][index] if documents and documents[0] else detail["memory_content"],
-                "summary": metadata.get("summary")
-                or detail["summary"]
-                or build_summary(detail["memory_content"]),
-                "preview": build_preview(detail["memory_content"], parsed.cleaned),
-                "source": detail["source"],
-                "source_type": detail["source_type"],
-                "title": detail["title"] or "Untitled document",
-                "author": detail["author"] or "",
-                "created_at": normalize_timestamp(detail["created_at"]),
-                "raw_document_id": detail["raw_document_id"],
-                "recall_domain": detail_domain or "default",
-                "trace": {
+            results.append(
+                {
+                    "memory_unit_id": memory_unit_id,
+                    "score": distances[0][index] if distances and distances[0] else None,
+                    "content": detail["memory_content"],
+                    "summary": detail["summary"] or build_summary(detail["memory_content"]),
+                    "preview": build_preview(detail["memory_content"], parsed.cleaned),
+                    "source": detail["source"],
+                    "source_type": detail["source_type"],
+                    "title": detail["title"] or "Untitled document",
+                    "author": detail["author"] or "",
+                    "created_at": normalize_timestamp(detail["created_at"]),
                     "raw_document_id": detail["raw_document_id"],
-                    "external_id": detail["external_id"],
-                    "root_document_id": detail["root_document_id"],
-                    "start_char": detail["start_char"],
-                    "end_char": detail["end_char"],
-                },
-            }
-        )
+                    "recall_domain": detail_domain or "default",
+                    "trace": {
+                        "raw_document_id": detail["raw_document_id"],
+                        "external_id": detail["external_id"],
+                        "root_document_id": detail["root_document_id"],
+                        "start_char": detail["start_char"],
+                        "end_char": detail["end_char"],
+                    },
+                }
+            )
 
-    return results[: requested_limit if limit is not None else settings.max_results_display]
+        if len(results) >= display_limit or len(ids[0]) < n_results or n_results >= max_candidates:
+            return results[:display_limit]
+        n_results = min(max_candidates, n_results * 2)
 
 
 def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, Any] | None:
@@ -199,6 +193,7 @@ def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, An
     memory_metadata = json.loads(detail["memory_metadata_json"]) if detail["memory_metadata_json"] else {}
     raw_metadata = json.loads(detail["raw_metadata_json"]) if detail["raw_metadata_json"] else {}
     raw_payload = json.loads(detail["raw_payload"]) if detail["raw_payload"] else {}
+    historical = not bool(detail["revision_is_current"])
 
     return {
         "memory_unit": {
@@ -212,6 +207,8 @@ def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, An
             "start_char": detail["start_char"],
             "end_char": detail["end_char"],
             "embedding_version": detail["embedding_version"],
+            "revision_id": detail["revision_id"],
+            "historical": historical,
             "metadata": memory_metadata,
         },
         "raw_document": {
@@ -221,12 +218,16 @@ def get_memory_unit_payload(sqlite_db: Any, memory_unit_id: str) -> dict[str, An
             "external_id": detail["external_id"],
             "root_document_id": detail["root_document_id"],
             "sequence": detail["sequence"],
-            "title": detail["title"],
-            "author": detail["author"],
-            "created_at": normalize_timestamp(detail["created_at"]),
+            "title": detail["revision_title"] if historical else detail["title"],
+            "author": detail["revision_author"] if historical else detail["author"],
+            "created_at": normalize_timestamp(detail["revision_created_at"] if historical else detail["created_at"]),
             "imported_at": normalize_timestamp(detail["imported_at"]),
             "content": detail["raw_content"],
             "content_hash": detail["content_hash"],
+            "revision_id": detail["revision_id"],
+            "latest_revision_id": detail["latest_revision_id"],
+            "edit_version": detail["edit_version"],
+            "historical": historical,
             "metadata": raw_metadata,
             "raw_payload": raw_payload,
         },

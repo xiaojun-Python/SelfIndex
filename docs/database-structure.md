@@ -11,6 +11,8 @@ The main database is SQLite or SQLCipher, depending on configuration.
 | `memory_units` | retrieval-facing chunks derived from the current revision |
 | `protected_terms` | protected recall rules |
 | `import_jobs` | import job history |
+| `vector_deletion_outbox` | committed Chroma deletion intents awaiting replay |
+| `profile_identity` | persistent random identity for distinguishing local sync targets |
 
 ## Relationship Model
 
@@ -19,6 +21,7 @@ raw_documents (1) ────< raw_document_revisions (N)
 raw_document_revisions (1) ────< memory_units (N)
 protected_terms (independent rules)
 import_jobs (independent job log)
+vector_deletion_outbox (independent deletion queue)
 ```
 
 ## `raw_documents`
@@ -101,6 +104,11 @@ Notes:
 - memory units are derived from the current revision
 - retrieval defaults to active documents only
 - `recall_domain` is a stored result label, not the original rule definition
+- `embedding_version` names the unit's embedding model; Chroma stores the collection-wide model in `selfindex_embedding_model`
+
+## `vector_deletion_outbox`
+
+Archive updates queue old vector IDs in the same SQL transaction. Replay holds the SQL writer lock, checks that each ID is no longer part of an active current revision, deletes its Chroma vector, then acknowledges the queue item. SQL and Chroma are not one atomic transaction, so periodic audits remain necessary.
 
 ## `protected_terms`
 

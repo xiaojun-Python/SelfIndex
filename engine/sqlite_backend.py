@@ -21,19 +21,24 @@ def using_sqlcipher() -> bool:
     return bool(settings.sqlite_cipher_key)
 
 
-def connect_database(db_path: str | Path):
-    path = str(Path(db_path))
+def connect_database(db_path: str | Path, *, read_only: bool = False):
+    file_path = Path(db_path)
+    if read_only and not file_path.is_file():
+        raise FileNotFoundError(file_path)
+    path = file_path.resolve().as_uri() + "?mode=ro" if read_only else str(file_path)
 
     if using_sqlcipher():
         if sqlcipher_dbapi is None:
             raise RuntimeError("SQLCipher key is configured, but sqlcipher3 is not installed.")
 
-        conn = sqlcipher_dbapi.connect(path)
+        conn = sqlcipher_dbapi.connect(path, uri=read_only)
         escaped_key = settings.sqlite_cipher_key.replace("'", "''")
         conn.execute(f"PRAGMA key = '{escaped_key}'")
     else:
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, uri=read_only)
 
     conn.row_factory = _dict_row_factory
     conn.execute("PRAGMA foreign_keys = ON")
+    if read_only:
+        conn.execute("PRAGMA query_only = ON")
     return conn

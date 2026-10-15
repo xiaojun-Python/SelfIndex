@@ -32,17 +32,38 @@ It is still alpha software:
 - browser capture depends on page structure and may break when sites change
 - multi-platform support is still early
 - conversation replay UX is not finished
-- the desktop runtime is local-first and Windows-oriented
+- Windows tray and macOS desktop currently have separate entry points
+- the macOS app and background service are still in development packaging
 
 ## Recommended Start Path
 
-Use the unified service script. It now starts the desktop runtime, system tray icon, and web service together:
+On macOS, sync dependencies and build the clickable development app:
+
+```bash
+uv sync
+.venv/bin/python -m scripts.build_macos_dev_app
+```
+
+Open `dist-dev/SelfIndex.app` in Finder. It creates or wakes the per-user LaunchAgent when needed; you can also manage it manually:
+
+```bash
+.venv/bin/python -m scripts.macos_launch_agent install
+.venv/bin/python -m scripts.macos_launch_agent status
+.venv/bin/python -m scripts.macos_launch_agent restart
+.venv/bin/python -m scripts.macos_launch_agent uninstall
+```
+
+The development `.app` still depends on this checkout and `.venv`; it is not yet portable to another Mac. Closing its window keeps the client in the Dock, while the background service runs independently. For one-off debugging, use `.venv/bin/python -m desktop_mac.main`. The existing `selfindex_service.sh` remains available for manual service runs, but do not run it alongside the LaunchAgent on the same port.
+
+Other local apps can query `GET http://127.0.0.1:5050/api/v1/search?query=...&limit=10` and `/api/v1/memory/<id>`. Edits and browser ingestion require the local write token stored at `data/api-write-token` by default.
+
+On Windows, use the PowerShell script. By default it starts the desktop runtime, system tray icon, and web service together:
 
 ```powershell
 .\scripts\selfindex_service.ps1 start
 ```
 
-Useful commands:
+Useful Windows commands:
 
 ```powershell
 .\scripts\selfindex_service.ps1 status
@@ -58,8 +79,8 @@ If you only want the web service without the tray runtime:
 
 Default URLs:
 
-- Web UI: `http://127.0.0.1:5000/`
-- Browser ingest: `http://127.0.0.1:5000/api/ingest/browser-conversation`
+- Legacy Web UI (kept during the transition): `http://127.0.0.1:5050/`
+- Browser ingest: `http://127.0.0.1:5050/api/ingest/browser-conversation`
 
 ## Main Workflows
 
@@ -142,10 +163,7 @@ UNLOCK_PREFIX_SENSITIVE=!
 
 Recommended reading order:
 
-1. `docs/current-system.md`
-2. `docs/architecture.md`
-3. `docs/database-structure.md`
-4. `docs/code-map.md`
+Start with the [documentation index](docs/README_ZH.md). Historical system and code maps are preserved in `docs/archive/`; current architecture and database references remain in `docs/architecture.md` and `docs/database-structure.md`.
 
 ## Running Tests
 

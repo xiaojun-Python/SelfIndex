@@ -7,6 +7,8 @@ from typing import Any
 
 from app.core.settings import settings
 from engine.database import DatabaseManager, VectorManager
+from engine.vector_index import write_current_vectors
+from engine.vector_outbox import drain_vector_deletions
 
 
 def _get_embedder(embedder: Any = None) -> Any:
@@ -26,6 +28,7 @@ def build_missing_embeddings(
     batch_size: int = 32,
     max_units: int | None = None,
 ) -> dict[str, int]:
+    drain_vector_deletions(sqlite_db, vector_db)
     embedder = _get_embedder(embedder)
     processed = 0
 
@@ -45,31 +48,17 @@ def build_missing_embeddings(
         ids = [row["memory_unit_id"] for row in rows]
         texts = [row["content"] for row in rows]
         embeddings = embedder.embed_documents(texts)
-        metadatas = [
-            {
-                "memory_unit_id": row["memory_unit_id"],
-                "raw_document_id": row["raw_document_id"],
-                "title": row["title"] or "Untitled document",
-                "source": row["source"],
-                "source_type": row["source_type"],
-                "author": row["author"] or "",
-                "created_at": row["created_at"] or "",
-                "summary": row["summary"] or "",
-                "recall_domain": row["recall_domain"] or "default",
-            }
-            for row in rows
-        ]
-
-        vector_db.delete_vectors(ids)
-        vector_db.add_vectors(
+        written = write_current_vectors(
+            sqlite_db,
+            vector_db,
             ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
             documents=texts,
+            versions=[row["embedding_version"] for row in rows],
+            embeddings=embeddings,
         )
-        with sqlite_db.transaction() as conn:
-            sqlite_db.mark_memory_units_as_embedded(ids, conn=conn)
-        processed += len(rows)
+        processed += len(written)
+        if not written:
+            break
 
     has_remaining = len(sqlite_db.get_memory_units_needing_embeddings(limit=1))
     return {

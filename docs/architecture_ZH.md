@@ -38,6 +38,7 @@ SelfIndex 当前的目标是：
 
 - `memory_units`
 - `Chroma` 集合
+- `vector_deletion_outbox`：归档提交后的向量删除重放；向量写入与重放通过 SQL 写锁协调
 
 ### 3. 召回层
 
@@ -54,6 +55,10 @@ SelfIndex 当前的目标是：
 - `engine/query_syntax.py`
 - `engine/retriever.py`
 - `/api/memory/search`
+
+## 运行边界
+
+macOS PySide6 客户端是独立进程，通过 loopback API 调用本机服务；关闭界面不等于停止服务。服务管理、App 启动和本机 API 见根目录 `README_ZH.md` 与 `docs/local-api_ZH.md`。SQLite/SQLCipher 保存归档真相，Chroma 作为可重建索引；两库对账和模型版本约束见 `docs/index-integrity_ZH.md`。
 
 ## 为什么存在修订版
 

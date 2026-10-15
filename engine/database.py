@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import hashlib
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -11,24 +13,80 @@ from app.core.settings import settings
 from engine.init_db import init_database
 from engine.memory import build_raw_document_revision, get_revision_id
 from engine.protected_terms import decode_term, encode_term
+from engine.profile_lock import acquire_writer_lease
 from engine.sqlite_backend import connect_database
+
+
+INDEX_MODEL_KEY = "selfindex_embedding_model"
+
+
+def _manifest_metadata(metadata: dict[str, Any] | None, model: str) -> dict[str, Any]:
+    # Chroma rejects hnsw:space in modify(), even when its value is unchanged.
+    return {**{key: value for key, value in (metadata or {}).items() if key != "hnsw:space"}, INDEX_MODEL_KEY: model}
+
+
+class IndexModelError(RuntimeError):
+    """The Chroma collection cannot safely use the configured embedding model."""
+
+
+class ReadOnlyDatabase:
+    """Open an existing SQLite/SQLCipher archive without schema initialization."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def get_connection(self):
+        return connect_database(self.path, read_only=True)
+
+    def count_pending_vector_deletions(self) -> int:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) AS count FROM vector_deletion_outbox").fetchone()
+        return int(row["count"])
 
 
 class VectorManager:
     """Thin wrapper around the Chroma collection used by SelfIndex."""
 
-    def __init__(self, persist_directory: str | Path) -> None:
+    def __init__(self, persist_directory: str | Path, *, create_if_missing: bool = True) -> None:
         self.persist_directory = Path(persist_directory)
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
+        if create_if_missing:
+            self.persist_directory.mkdir(parents=True, exist_ok=True)
+        elif not self.persist_directory.is_dir():
+            raise FileNotFoundError(self.persist_directory)
         try:
             import chromadb
         except Exception as exc:  # pragma: no cover - depends on local runtime
             raise RuntimeError("VectorManager requires a working chromadb installation.") from exc
         self.client = chromadb.PersistentClient(path=str(self.persist_directory))
-        self.collection = self.client.get_or_create_collection(
-            name="my_knowledge_chunks",
-            metadata={"hnsw:space": "cosine"},
-        )
+        if create_if_missing:
+            self.collection = self.client.get_or_create_collection(
+                name="my_knowledge_chunks",
+                metadata={"hnsw:space": "cosine"},
+            )
+        else:
+            self.collection = self.client.get_collection(name="my_knowledge_chunks")
+
+    def ensure_model_compatible(self, model: str, *, for_write: bool = False) -> None:
+        recorded = (self.collection.metadata or {}).get(INDEX_MODEL_KEY)
+        if recorded:
+            if recorded != model:
+                raise IndexModelError(
+                    f"Chroma index uses {recorded!r}, but the configured embedding model is {model!r}. "
+                    "Rebuild the index before switching models."
+                )
+            return
+        if self.collection.count():
+            raise IndexModelError(
+                "Chroma index has vectors but no embedding-model manifest. "
+                "Audit it and explicitly adopt its model before searching or writing."
+            )
+        if for_write:
+            self.collection.modify(metadata=_manifest_metadata(self.collection.metadata, model))
+
+    def adopt_existing_model(self, model: str) -> None:
+        if (self.collection.metadata or {}).get(INDEX_MODEL_KEY):
+            raise IndexModelError("Chroma index already has an embedding-model manifest.")
+        self.collection.modify(metadata=_manifest_metadata(self.collection.metadata, model))
 
     def add_vectors(
         self,
@@ -39,6 +97,7 @@ class VectorManager:
     ) -> None:
         if not ids:
             return
+        self.ensure_model_compatible(settings.embedding_model, for_write=True)
         self.collection.add(
             ids=ids,
             embeddings=embeddings,
@@ -59,6 +118,7 @@ class VectorManager:
             self.collection.delete(ids=ids)
 
     def search(self, query_vector: list[float], n_results: int = 5) -> dict[str, Any]:
+        self.ensure_model_compatible(settings.embedding_model)
         return self.collection.query(
             query_embeddings=[query_vector],
             n_results=n_results,
@@ -72,6 +132,7 @@ class DatabaseManager:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._writer_lease = acquire_writer_lease(self.db_path)
         self._initialize()
 
     def _initialize(self) -> None:
@@ -80,13 +141,43 @@ class DatabaseManager:
             self.seed_protected_terms(settings.protected_terms)
 
     def get_connection(self):
+        if self._writer_lease.pid != os.getpid():
+            self._writer_lease = acquire_writer_lease(self.db_path)
         return connect_database(self.db_path)
 
+    def profile_id(self, chroma_path: str | Path) -> str:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT profile_uuid FROM profile_identity WHERE id = 1").fetchone()
+        if row is None:
+            raise RuntimeError("Database profile identity is missing.")
+        identity = "\0".join(
+            (row["profile_uuid"], str(self.db_path.resolve()), str(Path(chroma_path).resolve()))
+        )
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+
+    def count_pending_embeddings(self) -> int:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM memory_units mu
+                JOIN raw_document_revisions rr ON rr.revision_id = mu.revision_id
+                JOIN raw_documents rd ON rd.raw_document_id = mu.raw_document_id
+                WHERE rr.is_current = 1 AND rd.is_active = 1 AND mu.is_embedded = 0
+                """
+            ).fetchone()
+        return int(row["count"])
+
+    def count_pending_source_writes(self) -> int:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) AS count FROM source_write_outbox").fetchone()
+        return int(row["count"])
+
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, immediate: bool = False):
         conn = self.get_connection()
         try:
-            conn.execute("BEGIN")
+            conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             yield conn
             conn.commit()
         except Exception:
@@ -176,7 +267,7 @@ class DatabaseManager:
         try:
             existing = conn.execute(
                 """
-                SELECT raw_document_id, latest_revision_id, current_content_hash
+                SELECT raw_document_id, latest_revision_id, current_content_hash, edit_version
                 FROM raw_documents
                 WHERE raw_document_id = ?
                 """,
@@ -210,6 +301,13 @@ class DatabaseManager:
                     metadata_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(raw_document_id) DO UPDATE SET
+                    edit_version = raw_documents.edit_version + CASE WHEN
+                        raw_documents.content_hash IS NOT excluded.content_hash OR
+                        raw_documents.title IS NOT excluded.title OR
+                        raw_documents.author IS NOT excluded.author OR
+                        raw_documents.metadata_json IS NOT excluded.metadata_json OR
+                        raw_documents.is_active IS NOT excluded.is_active
+                    THEN 1 ELSE 0 END,
                     source = excluded.source,
                     source_type = excluded.source_type,
                     external_id = excluded.external_id,
@@ -456,8 +554,11 @@ class DatabaseManager:
             if owns_connection:
                 conn.close()
 
-    def get_memory_unit_ids_by_revision(self, revision_id: str) -> list[str]:
-        with self.get_connection() as conn:
+    def get_memory_unit_ids_by_revision(self, revision_id: str, *, conn=None) -> list[str]:
+        owns_connection = conn is None
+        if owns_connection:
+            conn = self.get_connection()
+        try:
             rows = conn.execute(
                 """
                 SELECT memory_unit_id
@@ -467,7 +568,10 @@ class DatabaseManager:
                 """,
                 (revision_id,),
             ).fetchall()
-        return [row["memory_unit_id"] for row in rows]
+            return [row["memory_unit_id"] for row in rows]
+        finally:
+            if owns_connection:
+                conn.close()
 
     def list_active_raw_documents(
         self,
@@ -475,8 +579,12 @@ class DatabaseManager:
         source: str,
         source_type: str,
         root_document_id: str | None = None,
+        conn=None,
     ) -> list[sqlite3.Row]:
-        with self.get_connection() as conn:
+        owns_connection = conn is None
+        if owns_connection:
+            conn = self.get_connection()
+        try:
             if root_document_id is None:
                 return conn.execute(
                     """
@@ -494,6 +602,9 @@ class DatabaseManager:
                 """,
                 (source, source_type, root_document_id),
             ).fetchall()
+        finally:
+            if owns_connection:
+                conn.close()
 
     def list_conversation_raw_documents(
         self,
@@ -707,6 +818,18 @@ class DatabaseManager:
             if owns_connection:
                 conn.close()
 
+    def queue_vector_deletions(self, memory_unit_ids: list[str], *, conn) -> None:
+        if memory_unit_ids:
+            conn.executemany(
+                "INSERT OR IGNORE INTO vector_deletion_outbox (memory_unit_id) VALUES (?)",
+                [(memory_unit_id,) for memory_unit_id in sorted(set(memory_unit_ids))],
+            )
+
+    def count_pending_vector_deletions(self) -> int:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) AS count FROM vector_deletion_outbox").fetchone()
+        return int(row["count"])
+
     def create_import_job(
         self,
         *,
@@ -788,7 +911,7 @@ class DatabaseManager:
                 """
                 SELECT raw_document_id, source, source_type, external_id, root_document_id,
                        sequence, title, author, created_at, imported_at, content, content_hash,
-                       current_content_hash, latest_revision_id, is_active, raw_payload, metadata_json
+                       current_content_hash, latest_revision_id, edit_version, is_active, raw_payload, metadata_json
                 FROM raw_documents
                 WHERE raw_document_id = ?
                 """,
@@ -826,6 +949,9 @@ class DatabaseManager:
                 rr.is_current AS revision_is_current,
                 rr.content AS raw_content,
                 rr.content_hash,
+                rr.title AS revision_title,
+                rr.author AS revision_author,
+                rr.created_at AS revision_created_at,
                 rr.raw_payload,
                 rr.metadata_json AS raw_metadata_json,
                 rd.source,
@@ -838,6 +964,7 @@ class DatabaseManager:
                 rd.created_at,
                 rd.imported_at,
                 rd.latest_revision_id,
+                rd.edit_version,
                 rd.is_active
             FROM memory_units mu
             JOIN raw_document_revisions rr ON rr.revision_id = mu.revision_id
@@ -855,13 +982,17 @@ class DatabaseManager:
     def get_memory_unit_details(self, memory_unit_ids: list[str]) -> dict[str, sqlite3.Row]:
         if not memory_unit_ids:
             return {}
-        placeholders = ", ".join("?" for _ in memory_unit_ids)
+        details: dict[str, sqlite3.Row] = {}
         with self.get_connection() as conn:
-            rows = conn.execute(
-                self._memory_unit_detail_query(f"WHERE mu.memory_unit_id IN ({placeholders})"),
-                memory_unit_ids,
-            ).fetchall()
-        return {row["memory_unit_id"]: row for row in rows}
+            for start in range(0, len(memory_unit_ids), 500):
+                batch = memory_unit_ids[start : start + 500]
+                placeholders = ", ".join("?" for _ in batch)
+                rows = conn.execute(
+                    self._memory_unit_detail_query(f"WHERE mu.memory_unit_id IN ({placeholders})"),
+                    batch,
+                ).fetchall()
+                details.update({row["memory_unit_id"]: row for row in rows})
+        return details
 
     def get_memory_units_needing_embeddings(self, limit: int = 100) -> list[sqlite3.Row]:
         with self.get_connection() as conn:
@@ -874,6 +1005,7 @@ class DatabaseManager:
                     mu.content,
                     mu.summary,
                     mu.recall_domain,
+                    mu.embedding_version,
                     rd.title,
                     rd.source,
                     rd.source_type,

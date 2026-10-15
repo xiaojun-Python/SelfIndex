@@ -3,11 +3,15 @@ from __future__ import annotations
 import shutil
 import sqlite3
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlcipher3 import dbapi2 as sqlcipher_dbapi
 
 from scripts.migrate_to_sqlcipher import export_to_sqlcipher
+from app.core.settings import settings
+from engine.sqlite_backend import connect_database
 
 
 class SqlcipherMigrationTests(unittest.TestCase):
@@ -43,7 +47,12 @@ class SqlcipherMigrationTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row[0], "hello")
 
+        with patch("engine.sqlite_backend.settings", replace(settings, sqlite_cipher_key="test-passphrase")):
+            with connect_database(target_db, read_only=True) as read_only:
+                self.assertEqual(read_only.execute("SELECT title FROM notes").fetchone()["title"], "hello")
+                with self.assertRaises(Exception):
+                    read_only.execute("DELETE FROM notes")
+
 
 if __name__ == "__main__":
     unittest.main()
-

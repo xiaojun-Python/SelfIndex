@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import closing, nullcontext
 from pathlib import Path
 from typing import Any
 
 from app.core.settings import settings
+from engine.vector_outbox import drain_vector_deletions
 
 
 def collect_created_date_stats(
@@ -16,8 +18,10 @@ def collect_created_date_stats(
     source: str,
     source_type: str,
     created_date: str,
+    conn=None,
 ) -> dict[str, Any]:
-    with sqlite_db.get_connection() as conn:
+    connection_context = nullcontext(conn) if conn is not None else closing(sqlite_db.get_connection())
+    with connection_context as conn:
         raw_document_rows = conn.execute(
             """
             SELECT raw_document_id, root_document_id, external_id, created_at
@@ -94,36 +98,44 @@ def purge_documents_by_created_date(
     vector_db: Any = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    stats = collect_created_date_stats(
-        sqlite_db,
-        source=source,
-        source_type=source_type,
-        created_date=created_date,
-    )
-    if dry_run or stats["raw_documents_count"] == 0:
+    if dry_run:
+        stats = collect_created_date_stats(
+            sqlite_db, source=source, source_type=source_type, created_date=created_date,
+        )
         return {
             **stats,
             "deleted": False,
-            "dry_run": dry_run,
+            "dry_run": True,
         }
 
-    if vector_db is not None and stats["memory_unit_ids"]:
-        vector_db.delete_vectors(stats["memory_unit_ids"])
-
     with sqlite_db.transaction() as conn:
-        conn.execute(
-            """
-            DELETE FROM raw_documents
-            WHERE source = ?
-              AND source_type = ?
-              AND substr(COALESCE(created_at, ''), 1, 10) = ?
-            """,
-            (source, source_type, created_date),
+        stats = collect_created_date_stats(
+            sqlite_db, source=source, source_type=source_type, created_date=created_date, conn=conn,
         )
+        if stats["raw_documents_count"]:
+            sqlite_db.queue_vector_deletions(stats["memory_unit_ids"], conn=conn)
+            conn.execute(
+                """
+                DELETE FROM raw_documents
+                WHERE source = ?
+                  AND source_type = ?
+                  AND substr(COALESCE(created_at, ''), 1, 10) = ?
+                """,
+                (source, source_type, created_date),
+            )
+
+    if vector_db is not None and stats["raw_documents_count"]:
+        try:
+            drain_vector_deletions(sqlite_db, vector_db)
+        except Exception as exc:
+            raise RuntimeError(
+                "Archive deletion committed, but vector cleanup is queued. "
+                "Retry index recovery after checking the error."
+            ) from exc
 
     return {
         **stats,
-        "deleted": True,
+        "deleted": bool(stats["raw_documents_count"]),
         "dry_run": False,
     }
 

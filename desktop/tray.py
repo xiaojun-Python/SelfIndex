@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 import threading
 from ctypes import wintypes
 from pathlib import Path
@@ -113,6 +114,9 @@ class TrayIcon:
         on_restart,
         on_exit,
     ) -> None:
+        if not sys.platform.startswith("win"):
+            raise RuntimeError("The native tray icon is currently Windows-only.")
+
         self.on_open_backend = on_open_backend
         self.on_open_web = on_open_web
         self.on_restart = on_restart

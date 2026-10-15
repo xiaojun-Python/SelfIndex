@@ -1,5 +1,7 @@
 # 代码地图
 
+> 2026-09-27 归档。此地图未覆盖当前 macOS 与索引模块；现行文档见 `docs/README_ZH.md`。
+
 本文档回答一个实际问题：
 
 如果你刚接触这个仓库，哪些文件值得优先阅读。
@@ -21,18 +23,24 @@
 - Chroma
 - Flask 路由
 
-### `scripts/selfindex_service.ps1`
+### `scripts/selfindex_service.sh`
 
-推荐的本地启动入口。
+推荐的 macOS / Linux 本地 Web 服务入口。
 
 它管理：
 
-- 统一启动
+- Web 服务启动
 - 关闭
 - 重启
 - 状态检查
 
-默认它启动桌面运行时和托盘，然后托盘启动本地 Web 服务。
+它从 `.env` 读取 `HOST`、`PORT` 和 `DATA_DIR`，然后运行 `python -m app.main`。
+
+### `scripts/selfindex_service.ps1`
+
+Windows 本地服务入口。
+
+默认它启动 Windows 桌面运行时和托盘，然后托盘启动本地 Web 服务。
 
 ## Web 层
 
@@ -52,11 +60,11 @@
 
 ### `desktop/main.py`
 
-桌面运行时入口点。
+Windows 桌面运行时入口点。
 
 设置：
 
-- 系统托盘
+- 原生 Windows 系统托盘
 - 后端控制窗口
 - 单实例保护
 - 统一运行时 pid 交接

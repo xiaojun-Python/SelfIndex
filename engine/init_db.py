@@ -11,6 +11,31 @@ from engine.sqlite_backend import connect_database
 
 TABLE_SCHEMAS = [
     """
+    CREATE TABLE IF NOT EXISTS profile_identity (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        profile_uuid TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS markdown_sources (
+        source_id TEXT PRIMARY KEY,
+        root_path TEXT NOT NULL UNIQUE,
+        identity_mode TEXT NOT NULL CHECK (identity_mode IN ('legacy', 'scoped')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS source_write_outbox (
+        raw_document_id TEXT PRIMARY KEY,
+        root_path TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        expected_content_hash TEXT NOT NULL,
+        content TEXT NOT NULL,
+        queued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (raw_document_id) REFERENCES raw_documents(raw_document_id) ON DELETE CASCADE
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS raw_documents (
         raw_document_id TEXT PRIMARY KEY,
         source TEXT NOT NULL,
@@ -26,6 +51,7 @@ TABLE_SCHEMAS = [
         content_hash TEXT NOT NULL,
         current_content_hash TEXT,
         latest_revision_id TEXT,
+        edit_version INTEGER NOT NULL DEFAULT 0,
         is_active INTEGER NOT NULL DEFAULT 1,
         raw_payload TEXT,
         metadata_json TEXT,
@@ -90,6 +116,12 @@ TABLE_SCHEMAS = [
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS vector_deletion_outbox (
+        memory_unit_id TEXT PRIMARY KEY,
+        queued_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS protected_terms (
         term_id INTEGER PRIMARY KEY AUTOINCREMENT,
         term_encoded TEXT NOT NULL,
@@ -117,6 +149,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_memory_units_is_embedded ON memory_units(is_embedded);",
     "CREATE INDEX IF NOT EXISTS idx_import_jobs_started_at ON import_jobs(started_at);",
     "CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);",
+    "CREATE INDEX IF NOT EXISTS idx_vector_deletion_outbox_queued_at ON vector_deletion_outbox(queued_at);",
     "CREATE INDEX IF NOT EXISTS idx_protected_terms_active ON protected_terms(is_active);",
 ]
 
@@ -246,6 +279,10 @@ def init_database(db_path: str | Path) -> None:
         for sql in TABLE_SCHEMAS:
             cursor.execute(sql)
 
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_identity (id, profile_uuid) VALUES (1, lower(hex(randomblob(16))))"
+        )
+
         _ensure_column(
             cursor,
             "raw_documents",
@@ -263,6 +300,12 @@ def init_database(db_path: str | Path) -> None:
             "raw_documents",
             "latest_revision_id",
             "ALTER TABLE raw_documents ADD COLUMN latest_revision_id TEXT",
+        )
+        _ensure_column(
+            cursor,
+            "raw_documents",
+            "edit_version",
+            "ALTER TABLE raw_documents ADD COLUMN edit_version INTEGER NOT NULL DEFAULT 0",
         )
         _ensure_column(
             cursor,

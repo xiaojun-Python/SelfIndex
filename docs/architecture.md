@@ -1,5 +1,7 @@
 # Architecture
 
+The macOS PySide6 client and loopback API service run as separate processes. Closing the UI does not stop the service. SQLite/SQLCipher remains the archive source of truth; Chroma is a rebuildable search index. Vector deletion intents are persisted in `vector_deletion_outbox`, and index maintenance is documented in [Index integrity](index-integrity_ZH.md).
+
 ## Goal
 
 The current goal of SelfIndex is:

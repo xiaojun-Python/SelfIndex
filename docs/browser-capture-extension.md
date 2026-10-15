@@ -71,7 +71,11 @@ Not every provider exposes every field. Missing values are kept as `null` when n
 4. Click `Load unpacked`
 5. Select:
 
-`C:\Users\xiaoj\PycharmProjects\SelfIndex\browser_capture\ai_capture_extension`
+In this checkout, select the folder:
+
+`browser_capture/ai_capture_extension`
+
+On Windows, select the same `browser_capture\ai_capture_extension` folder inside your checkout.
 
 ## Using the Extension
 
@@ -108,7 +112,7 @@ This is necessary because Grok lazy-loads older messages instead of delivering t
 
 Current endpoint:
 
-`POST http://127.0.0.1:5000/api/ingest/browser-conversation`
+`POST http://127.0.0.1:5050/api/ingest/browser-conversation`
 
 The route name is still historical, but the payload now accepts multiple browser platforms.
 

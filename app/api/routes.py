@@ -7,14 +7,14 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 
+from bleach import clean as clean_html
 from flask import Blueprint, current_app, jsonify, render_template, request
 from markdown import markdown
 
-from app.core.settings import settings
-from engine.memory import build_memory_units, get_content_hash
+from app.core.local_auth import get_write_token, valid_write_token
+from app.services.documents import DocumentConflictError, DocumentNotFoundError, InvalidDocumentError, save_document
+from app.services.source_writeback import SourceWriteConflictError
 from engine.retriever import (
     get_memory_unit_payload,
     normalize_timestamp,
@@ -25,21 +25,29 @@ from engine.retriever import (
 from scripts.import_exports import import_browser_capture_payload
 
 bp = Blueprint("main", __name__)
-EMBEDDING_VERSION = "bge-small-zh-v1.5"
 
-
-def _hash_text(text: str) -> str:
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
+MARKDOWN_ALLOWED_TAGS = {
+    "a", "blockquote", "br", "code", "del", "div", "em", "h1", "h2", "h3",
+    "h4", "h5", "h6", "hr", "i", "li", "ol", "p", "pre", "span", "strong",
+    "table", "tbody", "td", "th", "thead", "tr", "ul",
+}
 
 
 def _is_local_request() -> bool:
     remote_addr = (request.remote_addr or "").strip()
-    return remote_addr in {"", "127.0.0.1", "::1"}
+    host = request.host.rsplit(":", 1)[0].strip("[]")
+    return remote_addr in {"", "127.0.0.1", "::1"} and host in {"127.0.0.1", "::1", "localhost"}
+
+
+@bp.before_request
+def _local_requests_only():
+    if not _is_local_request():
+        return _json_error("Only local requests are allowed.", 403)
 
 
 def _with_ingest_cors(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
     response.headers["Access-Control-Max-Age"] = "600"
     return response
@@ -68,44 +76,6 @@ def _render_search_results():
     )
 
 
-def _vector_payload(memory_units: list[dict], raw_document: dict):
-    """为新模型下重建后的 memory units 准备向量数据。"""
-    from engine.embedder import embedding_manager
-
-    texts = [unit["content"] for unit in memory_units]
-    embeddings = embedding_manager.embed_documents(texts) if texts else []
-    metadatas = [
-        {
-            "memory_unit_id": unit["memory_unit_id"],
-            "raw_document_id": unit["raw_document_id"],
-            "title": raw_document.get("title") or "Untitled document",
-            "source": raw_document["source"],
-            "source_type": raw_document["source_type"],
-            "author": raw_document.get("author") or "",
-            "created_at": raw_document.get("created_at") or "",
-            "summary": unit.get("summary") or "",
-            "recall_domain": unit.get("recall_domain") or "default",
-        }
-        for unit in memory_units
-    ]
-    vector_ids = [unit["memory_unit_id"] for unit in memory_units]
-    return vector_ids, embeddings, metadatas, texts
-
-
-def _restore_vectors(vector_db, old_vector_state):
-    """编辑失败回滚时，把旧向量重新放回去。"""
-    old_ids = old_vector_state.get("ids") or []
-    if not old_ids:
-        return
-
-    vector_db.add_vectors(
-        ids=old_ids,
-        embeddings=old_vector_state.get("embeddings") or [],
-        metadatas=old_vector_state.get("metadatas") or [],
-        documents=old_vector_state.get("documents") or [],
-    )
-
-
 def _render_memory_document(memory_unit_id, notice=None):
     """按 memory unit 查看完整原始文档。"""
     sqlite_db = current_app.config["SQLITE_DB"]
@@ -116,7 +86,14 @@ def _render_memory_document(memory_unit_id, notice=None):
     raw_document = payload["raw_document"]
     metadata = raw_document.get("metadata") or {}
     memory_unit = payload["memory_unit"]
-    content_html = markdown(raw_document["content"], extensions=["extra", "codehilite"])
+    content_html = clean_html(
+        markdown(raw_document["content"], extensions=["extra", "codehilite"]),
+        tags=MARKDOWN_ALLOWED_TAGS,
+        attributes={"a": ["href", "title"]},
+        protocols={"http", "https", "mailto"},
+        strip=True,
+        strip_comments=True,
+    )
 
     return render_template(
         "document_detail.html",
@@ -189,6 +166,10 @@ def ingest_browser_capture_payload():
     if not _is_local_request():
         return _with_ingest_cors(_json_error("Only local requests are allowed.", 403))
 
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ")
+    if not valid_write_token(token):
+        return _with_ingest_cors(_json_error("A valid local write token is required.", 401))
+
     payload = request.get_json(silent=True)
     if not payload:
         return _with_ingest_cors(_json_error("Missing JSON payload.", 400))
@@ -208,16 +189,16 @@ def ingest_browser_capture_payload():
     except Exception as exc:
         return _with_ingest_cors(_json_error(f"Import failed: {exc}", 500))
 
-    return _with_ingest_cors(
-        jsonify(
-            {
-                "ok": True,
-                "conversation_id": conversation_id,
-                "skip_embedding": skip_embedding,
-                **result,
-            }
-        )
+    response = jsonify(
+        {
+            "ok": True,
+            "conversation_id": conversation_id,
+            "skip_embedding": skip_embedding,
+            **result,
+        }
     )
+    response.status_code = 202 if result.get("index_status") == "pending" else 200
+    return _with_ingest_cors(response)
 
 
 @bp.route("/api/memory/<memory_unit_id>")
@@ -254,90 +235,63 @@ def edit_document(chunk_id):
             "title": raw_document["title"] or "",
             "sender": raw_document["author"] or "",
             "content": raw_document["content"] or "",
+            "expected_revision_id": raw_document["latest_revision_id"],
+            "expected_edit_version": raw_document["edit_version"],
+            "source_backed": raw_document["source"] == "markdown" and raw_document["source_type"] == "note_file",
             "tags": (raw_document.get("metadata") or {}).get("tags", []),
         },
+        write_token=get_write_token(),
     )
 
 
 @bp.route("/api/document/<chunk_id>", methods=["PUT"])
 def update_document(chunk_id):
     """基于新模型保存原始文档，并重建 memory units / vectors。"""
-    sqlite_db = current_app.config["SQLITE_DB"]
-    vector_db = current_app.config["VECTOR_DB"]
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ") or request.form.get("write_token", "")
+    if not valid_write_token(token):
+        return _json_error("A valid local write token is required.", 401)
 
-    payload = get_memory_unit_payload(sqlite_db, chunk_id)
-    if payload is None:
+    title = request.form.get("title") or ""
+    sender = request.form.get("sender") or ""
+    content = request.form.get("content") or ""
+    try:
+        expected_edit_version = int(request.form.get("expected_edit_version", "-1"))
+    except ValueError:
+        return _json_error("Invalid edit version.", 400)
+    try:
+        result = save_document(
+            current_app.config["SQLITE_DB"],
+            current_app.config["VECTOR_DB"],
+            chunk_id,
+            title=title,
+            author=sender,
+            content=content,
+            expected_revision_id=request.form.get("expected_revision_id"),
+            expected_edit_version=expected_edit_version,
+        )
+    except DocumentNotFoundError:
         return render_template(
             "document_detail.html",
             doc={"notice": "Record not found. It may have been deleted."},
         ), 404
-    raw_document = payload["raw_document"]
-
-    title = (request.form.get("title") or raw_document["title"] or "").strip() or "Untitled document"
-    sender = (request.form.get("sender") or raw_document["author"] or "").strip() or "unknown"
-    content = (request.form.get("content") or "").strip()
-    if not content:
+    except InvalidDocumentError as exc:
         return render_template(
             "document_form.html",
-            data={
-                "doc_id": chunk_id,
-                "title": title,
-                "sender": sender,
-                "content": content,
-                "tags": [],
-                "error": "Content cannot be empty.",
-            },
+            data={"doc_id": chunk_id, "title": title, "sender": sender, "content": content,
+                  "tags": [], "error": str(exc),
+                  "expected_revision_id": request.form.get("expected_revision_id"),
+                  "expected_edit_version": expected_edit_version},
+            write_token=get_write_token(),
         ), 400
-
-    existing_units = sqlite_db.get_memory_units_by_raw_document_id(raw_document["raw_document_id"])
-    old_memory_unit_ids = [row["memory_unit_id"] for row in existing_units]
-
-    try:
-        updated_raw_document = {
-            "raw_document_id": raw_document["raw_document_id"],
-            "source": raw_document["source"],
-            "source_type": raw_document["source_type"],
-            "external_id": raw_document["external_id"],
-            "root_document_id": raw_document["root_document_id"],
-            "sequence": raw_document.get("sequence"),
-            "title": title,
-            "author": sender,
-            "created_at": raw_document["created_at"],
-            "content": content,
-            "content_hash": get_content_hash(content),
-            "raw_payload": json.dumps(raw_document.get("raw_payload") or {}, ensure_ascii=False),
-            "metadata_json": json.dumps(raw_document.get("metadata") or {}, ensure_ascii=False),
-        }
-        upsert_result = sqlite_db.upsert_raw_document(updated_raw_document)
-        revision_id = upsert_result["revision_id"]
-
-        if upsert_result["revision_changed"]:
-            new_memory_units = build_memory_units(
-                updated_raw_document,
-                revision_id=revision_id,
-                embedding_version=settings.embedding_model,
-                protected_rules=sqlite_db.list_protected_terms(),
-            )
-            sqlite_db.insert_memory_units(new_memory_units)
-            previous_revision_id = upsert_result.get("previous_revision_id")
-            if previous_revision_id and previous_revision_id != revision_id:
-                vector_db.delete_vectors(sqlite_db.get_memory_unit_ids_by_revision(previous_revision_id))
-            new_vector_ids, embeddings, metadatas, documents = _vector_payload(
-                new_memory_units,
-                updated_raw_document,
-            )
-            if new_vector_ids:
-                vector_db.add_vectors(
-                    ids=new_vector_ids,
-                    embeddings=embeddings,
-                    metadatas=metadatas,
-                    documents=documents,
-                )
-                sqlite_db.mark_memory_units_as_embedded(new_vector_ids)
-        else:
-            new_memory_units = sqlite_db.get_memory_units_by_raw_document_id(
-                updated_raw_document["raw_document_id"]
-            )
+    except (DocumentConflictError, SourceWriteConflictError) as exc:
+        return render_template(
+            "document_form.html",
+            data={"doc_id": chunk_id, "title": title, "sender": sender, "content": content,
+                  "tags": [], "error": str(exc),
+                  "expected_revision_id": request.form.get("expected_revision_id"),
+                  "expected_edit_version": request.form.get("expected_edit_version")},
+            write_token=get_write_token(),
+        ), 409
     except Exception as exc:
         return render_template(
             "document_form.html",
@@ -348,13 +302,21 @@ def update_document(chunk_id):
                 "content": content,
                 "tags": [],
                 "error": f"Save failed: {exc}",
+                "expected_revision_id": request.form.get("expected_revision_id"),
+                "expected_edit_version": expected_edit_version,
             },
+            write_token=get_write_token(),
         ), 500
 
-    new_first_memory_unit_id = new_memory_units[0]["memory_unit_id"] if new_memory_units else chunk_id
     return _render_memory_document(
-        new_first_memory_unit_id,
-        notice="Saved. SQLite and Chroma are now in sync.",
+        result["memory_unit_id"],
+        notice=(
+            "Saved to archive, but source-file write is pending."
+            if result.get("source_status") == "pending"
+            else "Saved. Search indexing is pending."
+            if result["index_status"] == "pending"
+            else "Saved. Archive, source and search index are in sync."
+        ),
     )
 
 

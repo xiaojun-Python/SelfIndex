@@ -1,5 +1,7 @@
 # Code Map
 
+> Archived on 2026-09-27. This map omits the current macOS and index modules. See `docs/README_ZH.md` for maintained documents.
+
 This document answers a practical question:
 
 If you are new to the repository, which files are worth reading first?
@@ -21,18 +23,24 @@ It wires together:
 - Chroma
 - Flask routes
 
-### `scripts/selfindex_service.ps1`
+### `scripts/selfindex_service.sh`
 
-Recommended local start entry.
+Recommended macOS / Linux local web service entry.
 
 It manages:
 
-- unified startup
+- web service startup
 - shutdown
 - restart
 - status checks
 
-By default it starts the desktop runtime and tray, which then starts the local web service.
+It reads `HOST`, `PORT`, and `DATA_DIR` from `.env`, then runs `python -m app.main`.
+
+### `scripts/selfindex_service.ps1`
+
+Windows local service entry.
+
+By default it starts the Windows desktop runtime and tray, which then starts the local web service.
 
 ## Web Layer
 
@@ -52,11 +60,11 @@ It contains:
 
 ### `desktop/main.py`
 
-Desktop runtime entry point.
+Windows desktop runtime entry point.
 
 It sets up:
 
-- system tray
+- native Windows system tray
 - backend control window
 - single-instance guard
 - unified runtime pid handoff

@@ -253,9 +253,9 @@ class ChatGPTOrderAuditTests(unittest.TestCase):
 
         return conn
 
-    def test_reference_export_rebuild_differs_from_current_parser_order(self) -> None:
+    def test_reference_export_rebuild_matches_current_parser_order(self) -> None:
         _, parser_messages = list(parse_format_openai(str(self.export_path)))[0]
-        self.assertEqual([item["message_id"] for item in parser_messages], ["msg-2", "msg-1"])
+        self.assertEqual([item["message_id"] for item in parser_messages], ["msg-1", "msg-2"])
 
         export_bundle = load_chatgpt_export_bundles(self.export_path)["conv-1"]
         export_view = build_order_view(export_bundle)
@@ -263,7 +263,7 @@ class ChatGPTOrderAuditTests(unittest.TestCase):
         self.assertEqual(export_view.order_strategy, "parent_message_id")
         self.assertEqual(export_view.message_ids, ["msg-1", "msg-2"])
 
-    def test_audit_distinguishes_parser_issue_from_storage_gap(self) -> None:
+    def test_audit_reports_no_parser_issue_when_database_matches_export(self) -> None:
         conn = self._create_database_from_current_parser()
         self.addCleanup(conn.close)
 
@@ -276,10 +276,10 @@ class ChatGPTOrderAuditTests(unittest.TestCase):
             export_bundle=export_bundle,
         )
 
-        self.assertTrue(report["diagnosis"]["parser_ordering_issue"])
+        self.assertFalse(report["diagnosis"]["parser_ordering_issue"])
         self.assertFalse(report["diagnosis"]["storage_field_gap"])
         self.assertTrue(report["diagnosis"]["sortable_retrieval_supported"])
-        self.assertTrue(report["comparisons"]["database_vs_export"]["order_conflicts"])
+        self.assertEqual(report["comparisons"]["database_vs_export"]["order_conflicts"], [])
 
     def test_browser_sample_uses_capture_index_without_timestamps(self) -> None:
         browser_bundle = load_browser_sample_bundles(self.browser_sample_path)["conv-1"]

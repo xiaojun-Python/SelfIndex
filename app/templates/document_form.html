@@ -10,13 +10,16 @@
     {% endif %}
 
     <form hx-put="/api/document/{{ data.doc_id }}" hx-target="#content-display" hx-swap="innerHTML">
+        <input type="hidden" name="write_token" value="{{ write_token }}">
+        <input type="hidden" name="expected_revision_id" value="{{ data.expected_revision_id }}">
+        <input type="hidden" name="expected_edit_version" value="{{ data.expected_edit_version }}">
         <fieldset>
             <legend>基本信息</legend>
             <label for="edit-title-input">对话标题
-                <input type="text" id="edit-title-input" name="title" value="{{ data.title }}">
+                <input type="text" id="edit-title-input" name="title" value="{{ data.title }}" {% if data.source_backed %}readonly{% endif %}>
             </label>
             <label for="edit-sender-input">消息发送方
-                <input type="text" id="edit-sender-input" name="sender" value="{{ data.sender }}">
+                <input type="text" id="edit-sender-input" name="sender" value="{{ data.sender }}" {% if data.source_backed %}readonly{% endif %}>
             </label>
         </fieldset>
 

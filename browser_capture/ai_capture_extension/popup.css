@@ -45,6 +45,25 @@ h1 {
   font-size: 12px;
 }
 
+.token-control {
+  display: flex;
+  gap: 6px;
+}
+
+.token-control input {
+  min-width: 0;
+  flex: 1;
+}
+
+.token-control .visibility-button {
+  flex: none;
+  padding: 8px 10px;
+  border: 1px solid #d6ccbe;
+  border-radius: 6px;
+  background: #fffdf9;
+  color: #285848;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

@@ -8,11 +8,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from typing import Any
 
 from app.core.settings import settings
 from engine.memory import build_summary
+
+logger = logging.getLogger(__name__)
 
 
 def bootstrap_legacy_memory_layer(sqlite_db: Any) -> dict[str, int | bool]:
@@ -110,6 +113,9 @@ def warm_up_search_stack() -> None:
         from engine.embedder import embedding_manager
 
         _ = embedding_manager.model
-    except Exception:
+    except Exception as exc:
         # 预热失败不应该阻止应用启动。
-        return
+        logger.warning(
+            "Embedding warm-up failed; first search may load the model lazily: %s",
+            exc,
+        )

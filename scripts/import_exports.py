@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 from collections import Counter
 from decimal import Decimal
 from pathlib import Path
@@ -32,11 +33,15 @@ from typing import Any
 from app.core.settings import settings
 from engine.database import DatabaseManager, VectorManager
 from engine.memory import build_memory_units, build_raw_document
+from engine.vector_index import write_current_vectors
+from engine.vector_outbox import drain_vector_deletions
 from scripts.parsers.browser_capture_parser import parse_browser_capture_payload
 from scripts.parsers.browser_capture_parser import parse_format_browser_capture
 from scripts.parsers.chatgpt_parser import parse_format_openai
 from scripts.parsers.deepseek_parser import parse_format_deepseek
 from scripts.parsers.grok_parser import parse_format_grok
+
+logger = logging.getLogger(__name__)
 
 
 def select_parser(file_path: str):
@@ -268,7 +273,7 @@ def _import_conversation_batches(
     vector_db: VectorManager | None,
     embedder: Any = None,
     skip_embedding: bool = False,
-) -> dict[str, int]:
+) -> dict[str, int | str]:
     """导入标准化对话消息流，并返回本次写入的数据量。"""
     embedder = None if skip_embedding else _get_embedder(embedder)
     import_id = sqlite_db.create_import_job(
@@ -291,6 +296,8 @@ def _import_conversation_batches(
     imported_memory_units = 0
     resequenced_documents = 0
     protected_rules = sqlite_db.list_protected_terms()
+    vector_ids_to_delete: list[str] = []
+    embedding_jobs: list[list[dict[str, Any]]] = []
 
     try:
         with sqlite_db.transaction() as conn:
@@ -361,47 +368,16 @@ def _import_conversation_batches(
                         )
 
                     previous_revision_id = upsert_result.get("previous_revision_id")
-                    if (
-                        previous_revision_id
-                        and previous_revision_id != revision_id
-                        and vector_db is not None
-                    ):
-                        vector_db.delete_vectors(
-                            sqlite_db.get_memory_unit_ids_by_revision(previous_revision_id)
+                    if previous_revision_id and previous_revision_id != revision_id:
+                        vector_ids_to_delete.extend(
+                            sqlite_db.get_memory_unit_ids_by_revision(previous_revision_id, conn=conn)
                         )
 
-                    if (
-                        upsert_result["revision_changed"]
-                        and memory_units
-                        and vector_db is not None
-                        and embedder is not None
-                    ):
-                        texts = [unit["content"] for unit in memory_units]
-                        embeddings = embedder.embed_documents(texts)
-                        metadatas = [
-                            {
-                                "memory_unit_id": unit["memory_unit_id"],
-                                "raw_document_id": unit["raw_document_id"],
-                                "title": raw_document.get("title") or "Untitled document",
-                                "source": raw_document["source"],
-                                "source_type": raw_document["source_type"],
-                                "author": raw_document.get("author") or "",
-                                "created_at": raw_document.get("created_at") or "",
-                                "summary": unit.get("summary") or "",
-                                "recall_domain": unit.get("recall_domain") or "default",
-                            }
-                            for unit in memory_units
-                        ]
-                        vector_db.add_vectors(
-                            ids=[unit["memory_unit_id"] for unit in memory_units],
-                            embeddings=embeddings,
-                            metadatas=metadatas,
-                            documents=texts,
-                        )
-                        sqlite_db.mark_memory_units_as_embedded(
-                            [unit["memory_unit_id"] for unit in memory_units],
-                            conn=conn,
-                        )
+                    needs_embedding = upsert_result["revision_changed"] or any(
+                        not unit.get("is_embedded", 0) for unit in memory_units
+                    )
+                    if needs_embedding and memory_units and vector_db is not None and embedder is not None:
+                        embedding_jobs.append([dict(unit) for unit in memory_units])
 
                     imported_documents += 1
                     imported_memory_units += len(memory_units)
@@ -422,21 +398,50 @@ def _import_conversation_batches(
                     if updates:
                         sqlite_db.update_raw_document_sequence_fields(updates, conn=conn)
                         resequenced_documents += len(updates)
+
+            sqlite_db.queue_vector_deletions(vector_ids_to_delete, conn=conn)
+
     except Exception as exc:
         sqlite_db.finish_import_job(
             import_id,
             status="failed",
-            raw_documents_count=imported_documents,
-            memory_units_count=imported_memory_units,
+            raw_documents_count=0,
+            memory_units_count=0,
             error_message=str(exc),
         )
         raise
 
+    index_status = "pending" if skip_embedding or vector_db is None else "ready"
+    index_error: Exception | None = None
+    if vector_db is not None:
+        try:
+            drain_vector_deletions(sqlite_db, vector_db)
+
+            for memory_units in embedding_jobs:
+                texts = [unit["content"] for unit in memory_units]
+                embeddings = embedder.embed_documents(texts)
+                ids = [unit["memory_unit_id"] for unit in memory_units]
+                written = write_current_vectors(
+                    sqlite_db,
+                    vector_db,
+                    ids=ids,
+                    documents=texts,
+                    versions=[unit["embedding_version"] for unit in memory_units],
+                    embeddings=embeddings,
+                )
+                if len(written) != len(ids):
+                    index_status = "pending"
+        except Exception as exc:
+            logger.exception("Import archive committed, but indexing is pending: %s", import_id)
+            index_status = "pending"
+            index_error = exc
+
     sqlite_db.finish_import_job(
         import_id,
-        status="success",
+        status="index_pending" if index_status == "pending" and not skip_embedding else "success",
         raw_documents_count=imported_documents,
         memory_units_count=imported_memory_units,
+        error_message=str(index_error) if index_error is not None else None,
     )
 
     return {
@@ -444,6 +449,7 @@ def _import_conversation_batches(
         "raw_documents": imported_documents,
         "memory_units": imported_memory_units,
         "resequenced_documents": resequenced_documents,
+        "index_status": index_status,
     }
 
 
@@ -454,7 +460,7 @@ def import_export_file(
     vector_db: VectorManager | None,
     embedder: Any = None,
     skip_embedding: bool = False,
-) -> dict[str, int]:
+) -> dict[str, int | str]:
     """导入单个导出文件，并返回本次写入的数据量。"""
     source_path = Path(file_path)
     parser = select_parser(str(source_path))
@@ -479,7 +485,7 @@ def import_browser_capture_payload(
     vector_db: VectorManager | None,
     embedder: Any = None,
     skip_embedding: bool = False,
-) -> dict[str, int]:
+) -> dict[str, int | str]:
     """导入浏览器扩展直接发送的浏览器对话 payload。"""
     serialized_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     payload_hash = hashlib.sha256(serialized_payload.encode("utf-8")).hexdigest()
@@ -558,5 +564,5 @@ if __name__ == "__main__":
     print(
         "Imported raw documents: "
         f"{result['raw_documents']}, memory units: {result['memory_units']}. "
-        f"Database: {sqlite_db_path}"
+        f"Index: {result['index_status']}. Database: {sqlite_db_path}"
     )

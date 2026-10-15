@@ -10,15 +10,17 @@
 from __future__ import annotations
 
 import time
+import uuid
 
 from flask import Flask, render_template
 from flask import g
 from flask import request
 
 
-def create_app() -> Flask:
+def create_app(*, warm_up: bool = True) -> Flask:
     """创建并配置 Flask 应用实例。"""
     from app.api.routes import bp
+    from app.api.v1 import bp as api_v1_bp, register_error_handlers
     from app.core.settings import settings
     from engine.bootstrap import warm_up_search_stack
     from engine.database import DatabaseManager, VectorManager
@@ -32,9 +34,11 @@ def create_app() -> Flask:
     app.debug = settings.debug
 
     app.config["SETTINGS"] = settings
+    app.config["INSTANCE_ID"] = uuid.uuid4().hex
     app.config["SQLITE_DB"] = DatabaseManager(settings.sqlite_db_path)
     app.config["VECTOR_DB"] = VectorManager(settings.chroma_db_path)
-    warm_up_search_stack()
+    if warm_up:
+        warm_up_search_stack()
 
     @app.before_request
     def _mark_request_started():
@@ -59,4 +63,6 @@ def create_app() -> Flask:
         return render_template("index.html")
 
     app.register_blueprint(bp)
+    app.register_blueprint(api_v1_bp)
+    register_error_handlers(app)
     return app

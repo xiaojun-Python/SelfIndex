@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import closing, nullcontext
 from pathlib import Path
 from typing import Any
 from typing import TYPE_CHECKING
 
 from app.core.settings import settings
+from engine.vector_outbox import drain_vector_deletions
 
 if TYPE_CHECKING:
     from engine.database import DatabaseManager, VectorManager
@@ -19,8 +21,10 @@ def collect_source_stats(
     *,
     source: str,
     source_type: str,
+    conn=None,
 ) -> dict[str, Any]:
-    with sqlite_db.get_connection() as conn:
+    connection_context = nullcontext(conn) if conn is not None else closing(sqlite_db.get_connection())
+    with connection_context as conn:
         raw_documents_count = conn.execute(
             """
             SELECT COUNT(*) AS count
@@ -68,29 +72,38 @@ def purge_source_documents(
     vector_db: Any = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    stats = collect_source_stats(sqlite_db, source=source, source_type=source_type)
-    if dry_run or stats["raw_documents_count"] == 0:
+    if dry_run:
+        stats = collect_source_stats(sqlite_db, source=source, source_type=source_type)
         return {
             **stats,
             "deleted": False,
-            "dry_run": dry_run,
+            "dry_run": True,
         }
 
-    if vector_db is not None and stats["memory_unit_ids"]:
-        vector_db.delete_vectors(stats["memory_unit_ids"])
-
     with sqlite_db.transaction() as conn:
-        conn.execute(
-            """
-            DELETE FROM raw_documents
-            WHERE source = ? AND source_type = ?
-            """,
-            (source, source_type),
-        )
+        stats = collect_source_stats(sqlite_db, source=source, source_type=source_type, conn=conn)
+        if stats["raw_documents_count"]:
+            sqlite_db.queue_vector_deletions(stats["memory_unit_ids"], conn=conn)
+            conn.execute(
+                """
+                DELETE FROM raw_documents
+                WHERE source = ? AND source_type = ?
+                """,
+                (source, source_type),
+            )
+
+    if vector_db is not None and stats["raw_documents_count"]:
+        try:
+            drain_vector_deletions(sqlite_db, vector_db)
+        except Exception as exc:
+            raise RuntimeError(
+                "Archive deletion committed, but vector cleanup is queued. "
+                "Retry index recovery after checking the error."
+            ) from exc
 
     return {
         **stats,
-        "deleted": True,
+        "deleted": bool(stats["raw_documents_count"]),
         "dry_run": False,
     }
 
